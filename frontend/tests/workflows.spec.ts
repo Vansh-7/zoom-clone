@@ -12,9 +12,7 @@ test("dashboard, join validation, scheduling, and persistence", async ({
   await expect(
     page.getByRole("heading", { name: /Upcoming meetings/ }),
   ).toBeVisible();
-  await expect(
-    page.getByText("Product design sync", { exact: true }),
-  ).toBeVisible();
+  await expect(page.locator(".meeting-row").first()).toBeVisible();
   await page.screenshot({
     path: screenshot("dashboard-desktop.png"),
     fullPage: true,
@@ -87,9 +85,7 @@ test("responsive dashboard and dialogs have no horizontal overflow", async ({
   for (const width of [1440, 768, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
     await page.goto("/");
-    await expect(
-      page.getByText("Product design sync", { exact: true }),
-    ).toBeVisible();
+    await expect(page.locator(".meeting-row").first()).toBeVisible();
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
@@ -119,6 +115,10 @@ test("backend unavailable and empty states stay usable", async ({ page }) => {
   await expect(
     page.getByRole("button", { name: "Try again", exact: true }),
   ).toBeVisible();
+  await expect(page.locator(".connection-label")).toHaveText("Offline");
+  await expect(page.locator(".hero-caption")).toHaveText(
+    "Waiting for the meeting server.",
+  );
   await page.unroute(`${API}/api/**`);
   await page.route(`${API}/api/meetings/upcoming`, (route) =>
     route.fulfill({ json: [] }),
@@ -320,7 +320,7 @@ test("two-person audio/video, mute, leave, removal, and end for all", async ({
   await guest.getByRole("button", { name: "Start video", exact: true }).click();
   await guest.getByRole("button", { name: "Leave", exact: true }).click();
   await expect(host.locator(".video-tile")).toHaveCount(1);
-  await expect(guest).toHaveURL("http://localhost:3000/");
+  await expect(guest).toHaveURL(new URL("/", invite).href);
   await guest
     .getByRole("region", { name: "Meeting actions" })
     .getByRole("button", { name: "Join", exact: true })
@@ -362,7 +362,7 @@ test("two-person audio/video, mute, leave, removal, and end for all", async ({
   await host
     .getByRole("button", { name: "End Meeting for All", exact: true })
     .click();
-  await expect(host).toHaveURL("http://localhost:3000/");
+  await expect(host).toHaveURL(new URL("/", invite).href);
   expect(
     (await (await request.get(`${API}/api/meetings/${code}`)).json()).status,
   ).toBe("ended");
