@@ -21,7 +21,7 @@ This is an original educational implementation, not an official Zoom product. Vi
 - Browser tab/window/screen sharing, remote presentation view, and camera restoration when sharing stops. Microphone audio remains unchanged.
 - Meeting-isolated text chat with server-assigned names/timestamps, validation, and rate limiting.
 
-Profile, settings, and contacts are labeled placeholders. Login, recording, and virtual backgrounds are outside this assignment build. Read [INTERVIEW_NOTES.md](INTERVIEW_NOTES.md) for simple explanations of the implementation.
+Profile, settings, and contacts are labeled placeholders. Login, recording, and virtual backgrounds are outside this assignment build.
 
 ## Application screenshots
 
