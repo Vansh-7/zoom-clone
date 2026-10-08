@@ -258,11 +258,25 @@ Latest improvements were verified locally on **9 October 2026 (India time)**:
 | Backend pytest                                     | **42 passed**, including expired/claimed samples, concurrency, collision retries, chat isolation/validation, and existing API/signaling checks                                              |
 | Playwright against the local production build      | **11 passed**, including authenticated UDP/TCP relay transport, ICE failure/retry, screen-share cancellation/remote pixels/camera restoration, chat, mandatory workflows, and host controls |
 | ESLint, TypeScript, Next.js production build, Ruff | Passed                                                                                                                                                                                      |
-| Backend Docker image                               | Built successfully from the release source                                                                                                                                                 |
+| Backend Docker image                               | Built successfully from the release source                                                                                                                                                  |
 | SQLite persistence                                 | Real scheduled record retained its ID, title, description, UTC timestamp, timezone, duration, status, and creation time across an actual backend process restart                            |
 | Visual review                                      | Official Zoom home/gallery references compared with actual 1440, 768, and 390 px screenshots; responsive interactions and overflow checks passed                                            |
 
-The latest changes are awaiting CI and deployment verification. Both existing deployment projects were confirmed in Vansh's accounts: Railway's personal **Vansh Gupta's Projects** workspace and Vercel's **zoom-clone-vansh** project. The public links above still serve the earlier verified release until this update is deployed. Hosted TURN/TLS, physical laptops/Wi-Fi, native screen-source selection, Safari/Firefox, and larger rooms remain untested.
+The application release at `53a71a7` is deployed on both existing projects in Vansh's accounts: Railway's personal **Vansh Gupta's Projects** workspace and Vercel's **zoom-clone-vansh** project. Branch CI and [main CI](https://github.com/Vansh-7/zoom-clone/actions/runs/37845072352) passed before final production verification.
+
+| Latest production check                   | Result                                                                                                                                                                             |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Railway / Vercel                          | Backend deployment `81b584bc-60ff-4d47-b08f-eed120a4e984` succeeded; frontend deployment `dpl_8z9dG9Bv94Abmaq4REAqe9Mf5Uxq` is Ready, both from `53a71a7`                          |
+| Full Playwright suite against public URLs | **9 passed, 2 skipped**; relay tests correctly skipped without hosted TURN credentials                                                                                             |
+| Mandatory workflows                       | Dashboard, instant creation, ID/direct-link join validation, scheduling, and refresh persistence passed                                                                            |
+| Conferencing and host controls            | Bidirectional audio/video RTP and decoded frames, mute/unmute, leave/rejoin, removal, end-for-all, and failed-ICE retry passed                                                     |
+| Screen sharing and chat                   | Remote presentation pixels, cancellation, browser-ended/camera-off restoration, continuing microphone audio, and bidirectional plain-text chat passed; capture input was synthetic |
+| SQLite persistence                        | Schedule `57880163539` retained its ID, title, description, UTC timestamp, timezone, duration, status, and creation time across the actual backend deployment                      |
+| Future samples                            | Three future unclaimed demos were returned; repeated dashboard reads retained identical sample IDs                                                                                 |
+| Public access and origins                 | Public frontend returns 200 without login; HTTPS API healthy; exact CORS origin accepted and unrelated origin rejected; production WSS used by browser tests                       |
+| Responsive/error states                   | Desktop/tablet/mobile overflow checks, backend unavailable/empty states, host-first waiting, and media permission denial passed                                                    |
+
+Railway's source follows `main`, with the original `/data` volume and one replica preserved. Vercel follows the same repository's `main` branch. No additional required variables, schema migration, or dependencies were introduced. Hosted TURN/TLS, physical laptops/Wi-Fi, native screen-source selection, Safari/Firefox, and larger rooms remain untested.
 
 Historical results for the earlier deployed release (8–9 October 2026):
 
@@ -274,7 +288,7 @@ Historical results for the earlier deployed release (8–9 October 2026):
 | SQLite persistence                                       | Scheduled records survived backend and container restarts; six seed identities and timestamps remained unchanged |
 | Production dependency audit                              | 0 vulnerabilities reported                                                                                       |
 
-Cloud verification completed on **9 October 2026 (India time)** against the linked Vercel frontend and Railway backend:
+Earlier cloud verification on **8–9 October 2026 (India time)**, before the release above:
 
 | Deployed check                                                          | Result                                                                                                                                       |
 | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -110,4 +110,4 @@ The authenticated room manager broadcasts chat only to sockets in that meeting. 
 
 Use accounts and audited authorization, PostgreSQL with migrations, shared signaling/presence, and an SFU instead of browser mesh. Add TURN capacity, short-lived credentials, rate limiting, observability, durable meeting events, backups, accessibility/browser testing, and regional deployment. Keep media transport separate from meeting management.
 
-The right next step is stronger reliability and operational controls, not adding cosmetic features before the core workflows work.
+The next steps are stronger reliability, operational controls, and wider device/network testing.
