@@ -398,7 +398,6 @@ export function Dashboard({ view }: { view: "home" | "meetings" }) {
         <div className="dashboard-inner">
           <div className="page-heading">
             <div>
-              <span className="workspace-eyebrow">PERSONAL WORKSPACE</span>
               <h2>{view === "home" ? "Home" : "Meetings"}</h2>
             </div>
             <span className="workspace-chip">
@@ -514,7 +513,13 @@ export function Dashboard({ view }: { view: "home" | "meetings" }) {
                     ))}
                   </div>
                 ) : next.length ? (
-                  <div>{next.map((meeting) => meetingRow(meeting))}</div>
+                  <div
+                    className={
+                      view === "home" ? "home-meeting-list" : undefined
+                    }
+                  >
+                    {next.map((meeting) => meetingRow(meeting))}
+                  </div>
                 ) : (
                   empty("upcoming")
                 )}
@@ -549,10 +554,12 @@ export function Dashboard({ view }: { view: "home" | "meetings" }) {
                     ))}
                   </div>
                 ) : past.length ? (
-                  <div>
-                    {past
-                      .slice(0, view === "home" ? 3 : 100)
-                      .map((meeting) => meetingRow(meeting, true))}
+                  <div
+                    className={
+                      view === "home" ? "home-meeting-list" : undefined
+                    }
+                  >
+                    {past.map((meeting) => meetingRow(meeting, true))}
                   </div>
                 ) : (
                   empty("recent")
