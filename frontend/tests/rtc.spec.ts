@@ -165,6 +165,9 @@ test("ICE failure diagnostics and retry recover without leaving the room", async
     await room.guest
       .getByRole("button", { name: "Copy connection diagnostics" })
       .click();
+    await expect(room.guest.getByRole("status").last()).toContainText(
+      "Connection diagnostics copied",
+    );
     const report = JSON.parse(
       await room.guest.evaluate(() => navigator.clipboard.readText()),
     );
