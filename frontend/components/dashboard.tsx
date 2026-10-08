@@ -71,6 +71,7 @@ export function Dashboard({ view }: { view: "home" | "meetings" }) {
   const [upcoming, setUpcoming] = useState<Meeting[]>([]);
   const [recent, setRecent] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
+  const [timezone, setTimezone] = useState("");
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState<
     "join" | "schedule" | "profile" | "settings" | "help" | null
@@ -96,6 +97,7 @@ export function Dashboard({ view }: { view: "home" | "meetings" }) {
     } catch (error) {
       setError(errorMessage(error));
     } finally {
+      setTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone);
       setLoading(false);
     }
   }, []);
@@ -519,10 +521,13 @@ export function Dashboard({ view }: { view: "home" | "meetings" }) {
                 <div className="panel-footer">
                   <CalendarDays size={14} />
                   <span>
-                    {Intl.DateTimeFormat()
-                      .resolvedOptions()
-                      .timeZone.replaceAll("_", " ")}{" "}
-                    <span className="footer-dot">·</span> Your local time
+                    {timezone && (
+                      <>
+                        {timezone.replaceAll("_", " ")}{" "}
+                        <span className="footer-dot">·</span>{" "}
+                      </>
+                    )}
+                    Your local time
                   </span>
                 </div>
               </section>

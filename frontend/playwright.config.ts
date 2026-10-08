@@ -10,6 +10,7 @@ export default defineConfig({
   use: {
     channel: process.env.E2E_BROWSER_CHANNEL,
     baseURL: process.env.E2E_FRONTEND_URL ?? "http://localhost:3000",
+    timezoneId: "Asia/Kolkata",
     viewport: { width: 1440, height: 1000 },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",

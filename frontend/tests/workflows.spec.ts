@@ -8,6 +8,8 @@ test("dashboard, join validation, scheduling, and persistence", async ({
   page,
   request,
 }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");
   await expect(
     page.getByRole("heading", { name: /Upcoming meetings/ }),
@@ -77,6 +79,7 @@ test("dashboard, join validation, scheduling, and persistence", async ({
     body: JSON.stringify(await record.json(), null, 2),
     contentType: "application/json",
   });
+  expect(errors).toEqual([]);
 });
 
 test("responsive dashboard and dialogs have no horizontal overflow", async ({
