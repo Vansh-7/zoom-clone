@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 import pytest
@@ -341,3 +342,19 @@ def test_replenishment_retries_code_collision_and_respects_seed_setting(client):
             assert db.scalar(select(func.count()).select_from(Meeting)) == 6
             replenish_samples(db)
             assert db.scalar(select(func.count()).select_from(Meeting)) == 9
+
+
+def test_concurrent_sample_replenishment_has_no_duplicates(client):
+    def refresh():
+        with SessionLocal() as db:
+            replenish_samples(db)
+
+    with patch(
+        "app.services.meetings.utcnow", return_value=utcnow() + timedelta(days=7)
+    ):
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = [pool.submit(refresh) for _ in range(3)]
+            for future in futures:
+                future.result()
+    with SessionLocal() as db:
+        assert db.scalar(select(func.count()).select_from(Meeting)) == 9
