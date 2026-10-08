@@ -17,9 +17,23 @@ This is an original educational implementation, not an official Zoom product. Vi
 - Real two-person camera/audio conferencing, media preview, microphone/camera toggles, roster, invitations, and leave/end actions.
 - Server-authorized host mute-all, participant removal, and end-for-everyone.
 - Clear media permission errors, joining without media, host-first scheduled admission, and explicit rejoining after disconnection.
-- Three upcoming and three completed sample meetings, seeded once without duplication.
+- Three initial upcoming and three completed sample meetings, with safe replenishment of future demos when older samples expire.
+- Browser tab/window/screen sharing, remote presentation view, and camera restoration when sharing stops. Microphone audio remains unchanged.
+- Meeting-isolated text chat with server-assigned names/timestamps, validation, and rate limiting.
 
-Profile, settings, and contacts are labeled placeholders. Login, chat, recording, and screen sharing are outside this assignment build.
+Profile, settings, and contacts are labeled placeholders. Login, recording, and virtual backgrounds are outside this assignment build. Read [INTERVIEW_NOTES.md](INTERVIEW_NOTES.md) for simple explanations of the implementation.
+
+## Application screenshots
+
+Captured from the actual local production build with SQLite-backed sample records. The room screenshot shows two admitted participants with cameras off; separate media tests verify real RTP and decoded frames.
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+![Two-participant meeting room and host controls](docs/screenshots/meeting-room.png)
+
+![Scheduling dialog](docs/screenshots/scheduling.png)
+
+<img src="docs/screenshots/mobile.png" alt="Mobile dashboard" width="390" />
 
 ## Stack and structure
 
@@ -93,11 +107,11 @@ On macOS/Linux, use `python3 -m venv .venv`, `.venv/bin/python`, `cp`, and `npm`
 | `DATABASE_URL`             | Backend              | `sqlite:///./data/zoom.db`; production `sqlite:////data/zoom.db`                           |
 | `FRONTEND_URL`             | Backend              | Canonical invitation origin, local `http://localhost:3000`                                 |
 | `CORS_ORIGINS`             | Backend              | Comma-separated exact frontend origins; also checked for WebSockets                        |
-| `SEED_DATA`                | Backend              | `true`; creates six sample meetings only if their stable seed keys are absent              |
+| `SEED_DATA`                | Backend              | `true`; initial samples plus bounded, idempotent future-demo replenishment                 |
 | `MAX_PARTICIPANTS`         | Backend              | `2` verified; validation permits up to 6, but larger rooms have not been acceptance-tested |
 | `DISCONNECT_GRACE_SECONDS` | Backend              | `30`; grace before ending a call after host socket loss                                    |
 | `ICE_SERVERS_JSON`         | Backend              | JSON array of WebRTC ICE servers; default public Google STUN                               |
-| `ICE_TRANSPORT_POLICY`     | Backend              | `all` for direct/relay candidates; `relay` forces TURN for diagnostics                      |
+| `ICE_TRANSPORT_POLICY`     | Backend              | `all` for direct/relay candidates; `relay` forces TURN for diagnostics                     |
 | `PORT`                     | Container            | Platform HTTP port, default 8000                                                           |
 | `RAILWAY_RUN_UID`          | Railway only         | `0` so the process can write Railway's root-owned volume                                   |
 
@@ -154,7 +168,7 @@ erDiagram
 
 Foreign keys are enforced on every SQLite connection. WAL mode and a busy timeout allow short concurrent read/write operations. Codes, seed keys, schedule/status queries, and membership queries are indexed. UTC timestamps are stored consistently and returned as timezone-aware ISO 8601 values. The original scheduling timezone is retained for explanation/display. Guest participants do not need User rows.
 
-Seeding preserves original timestamps across restarts. Sample schedules eventually become missed rather than being silently moved into the future. Admission uses a short `BEGIN IMMEDIATE` transaction so simultaneous joins cannot bypass capacity or the single-host rule.
+Seeding preserves every original record and timestamp. At startup and on dashboard reads, each of three sample slots is checked for a future, unclaimed demo. If absent, a new record uses a stable key such as `sample-upcoming-0-2026-10-09`. A unique constraint and savepoint retries protect concurrent reads and code collisions. Each slot adds at most one replacement per UTC day, so repeatedly claiming demos cannot create unlimited records. Expired samples remain missed in recent history; claimed samples and real user-created meetings are never rewritten, rescheduled, or deleted. Set `SEED_DATA=false` to disable replenishment. Admission uses a short `BEGIN IMMEDIATE` transaction so simultaneous joins cannot bypass capacity or the single-host rule.
 
 ## API
 
@@ -175,7 +189,7 @@ All path identifiers below are 11-digit meeting codes, not internal row IDs. Swa
 | GET    | `/api/rtc-config`                                                 | ICE servers and room capacity                                         |
 | WS     | `/ws/meetings/{code}`                                             | First message `{ "type": "auth", "token": "participant-capability" }` |
 
-WebSocket events include `welcome`, `participant-joined`, `participant-left`, `media-state`, targeted `offer`/`answer`/`candidate`, `mute-request`, `removed`, and `meeting-ended`. The server assigns sender identity and rejects cross-room targeting and guest host commands. Raw capabilities are excluded from URLs and public meeting responses.
+WebSocket events include `welcome`, `participant-joined`, `participant-left`, `media-state` (including `screen_sharing`), targeted `offer`/`answer`/`candidate`/`restart-ice`, `chat`, `mute-request`, `removed`, and `meeting-ended`. The server assigns sender identity and rejects cross-room targeting and guest host commands. Chat text is trimmed, limited to 2000 characters and two messages per second per participant. Each browser retains only its latest 100 received messages; joining later or refreshing does not retrieve history. Raw capabilities are excluded from URLs and public meeting responses.
 
 ## Meeting behavior and decisions
 
@@ -186,6 +200,8 @@ WebSocket events include `welcome`, `participant-joined`, `participant-left`, `m
 5. **Lifecycle:** scheduled guests wait until the host starts. Ended/missed meetings reject admission. Planned duration does not terminate active calls. Host socket loss has a 30-second grace; reconnecting is an explicit rejoin. A backend restart ends active sessions while preserving all meeting records.
 6. **WebRTC:** the lower participant ID makes the offer. The answerer uses offered transceivers; ICE candidates are queued until the remote description exists. Track replacement lets a participant enable devices after joining without renegotiating the whole call.
 7. **Host actions:** authorization is checked on the server. Mute-all asks compliant browsers to disable microphones; guests can unmute themselves. Removal revokes that participant session, but a person can join again as a new guest because there is no account identity.
+8. **Screen sharing:** `getDisplayMedia` runs directly from a button click. It replaces the existing video sender via `replaceTrack`, retaining the microphone track and the original camera stream. Stop Share, the browser's stop event, leaving, removal, and ending clean up capture. Camera on/off state is restored; shared content is displayed without mirroring or cropping. Shared system/tab audio is intentionally excluded.
+9. **Chat:** authenticated WebSockets broadcast plain text only to the current room. The server supplies participant identity, message ID, and UTC timestamp. React renders the text without HTML interpretation. No chat tables or external messaging service are needed.
 
 An instant meeting abandoned before its host joins can remain active until the host returns and ends it or the backend restarts. No complex recovery or lifecycle scheduler was added ahead of mandatory features.
 
@@ -235,29 +251,42 @@ The automated failure/retry test substitutes unreachable media candidates while 
 
 ## Verification
 
-The following checks were executed locally on 8–9 October 2026:
+Latest improvements were verified locally on **9 October 2026 (India time)**:
+
+| Check                                              | Result                                                                                                                                                                                      |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend pytest                                     | **42 passed**, including expired/claimed samples, concurrency, collision retries, chat isolation/validation, and existing API/signaling checks                                              |
+| Playwright against the local production build      | **11 passed**, including authenticated UDP/TCP relay transport, ICE failure/retry, screen-share cancellation/remote pixels/camera restoration, chat, mandatory workflows, and host controls |
+| ESLint, TypeScript, Next.js production build, Ruff | Passed                                                                                                                                                                                      |
+| Backend Docker image                               | Built successfully from the release source                                                                                                                                                 |
+| SQLite persistence                                 | Real scheduled record retained its ID, title, description, UTC timestamp, timezone, duration, status, and creation time across an actual backend process restart                            |
+| Visual review                                      | Official Zoom home/gallery references compared with actual 1440, 768, and 390 px screenshots; responsive interactions and overflow checks passed                                            |
+
+The latest changes are awaiting CI and deployment verification. Both existing deployment projects were confirmed in Vansh's accounts: Railway's personal **Vansh Gupta's Projects** workspace and Vercel's **zoom-clone-vansh** project. The public links above still serve the earlier verified release until this update is deployed. Hosted TURN/TLS, physical laptops/Wi-Fi, native screen-source selection, Safari/Firefox, and larger rooms remain untested.
+
+Historical results for the earlier deployed release (8–9 October 2026):
 
 | Check                                                    | Result                                                                                                           |
 | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Backend API, database, and signaling tests               | 37 passed on Windows; backend CI also passed on Linux                                                           |
-| Browser acceptance tests against the production build    | 9 passed, including failed-ICE recovery, authenticated UDP/TCP relay RTP, and all existing meeting workflows       |
+| Backend API, database, and signaling tests               | 37 passed on Windows; backend CI also passed on Linux                                                            |
+| Browser acceptance tests against the production build    | 9 passed, including failed-ICE recovery, authenticated UDP/TCP relay RTP, and all existing meeting workflows     |
 | TypeScript, ESLint, Prettier, Ruff, and production build | Passed                                                                                                           |
 | SQLite persistence                                       | Scheduled records survived backend and container restarts; six seed identities and timestamps remained unchanged |
 | Production dependency audit                              | 0 vulnerabilities reported                                                                                       |
 
 Cloud verification completed on **9 October 2026 (India time)** against the linked Vercel frontend and Railway backend:
 
-| Deployed check                                                  | Result                                                                                                                                       |
-| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Public production frontend                                      | Opens without Vercel login; production build Ready                                                                                           |
-| HTTPS API health and Swagger                                    | Both return 200; health confirms SQLite                                                                                                      |
-| CORS                                                            | Exact frontend origin accepted; unrelated origin rejected                                                                                    |
-| Dashboard, instant creation, ID/direct-link joining, scheduling | Passed against the real deployed API and database                                                                                            |
-| Full browser acceptance suite                                   | **7 passed, 2 skipped** on production; relay tests skip because hosted TURN credentials are not configured                                    |
-| Two-person WebRTC over production WSS signaling                 | Both contexts received nonzero real audio/video RTP packets and decoded remote video frames using synthetic devices                         |
-| Host controls, ICE recovery, and meeting cleanup                 | Mute-all, unmute, remove, leave/rejoin, end-for-all, duplicate joins, ICE-before-SDP ordering, and failed-ICE retry passed                    |
-| Persistent Railway SQLite volume                                | Saved schedule `20264058542` retained its title, UTC time, duration, and other fields after restart; all six seed records remained identical |
-| Desktop/tablet/mobile                                           | 1440, 768, and 390 px layouts and dialogs passed overflow/interaction checks and were visually reviewed                                      |
+| Deployed check                                                          | Result                                                                                                                                       |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public production frontend                                              | Opens without Vercel login; production build Ready                                                                                           |
+| HTTPS API health and Swagger                                            | Both return 200; health confirms SQLite                                                                                                      |
+| CORS                                                                    | Exact frontend origin accepted; unrelated origin rejected                                                                                    |
+| Dashboard, instant creation, ID/direct-link joining, scheduling         | Passed against the real deployed API and database                                                                                            |
+| Full browser acceptance suite                                           | **7 passed, 2 skipped** on production; relay tests skip because hosted TURN credentials are not configured                                   |
+| Two-person WebRTC over production WSS signaling                         | Both contexts received nonzero real audio/video RTP packets and decoded remote video frames using synthetic devices                          |
+| Host controls, ICE recovery, and meeting cleanup                        | Mute-all, unmute, remove, leave/rejoin, end-for-all, duplicate joins, ICE-before-SDP ordering, and failed-ICE retry passed                   |
+| Persistent Railway SQLite volume                                        | Saved schedule `20264058542` retained its title, UTC time, duration, and other fields after restart; all six seed records remained identical |
+| Desktop/tablet/mobile                                                   | 1440, 768, and 390 px layouts and dialogs passed overflow/interaction checks and were visually reviewed                                      |
 | CI with meeting, ICE failure/retry, and negotiation regression coverage | [Passed](https://github.com/Vansh-7/zoom-clone/actions/runs/37835540483)                                                                     |
 
 Application code at `d54a6d1` was verified on both deployed services; `ec61145` only waits for asynchronous clipboard confirmation in the diagnostic test. Frontend API configuration, backend invitation URLs, and CORS use the production domains linked above. The previous frontend address redirects to the new address while preserving invitation paths. Railway uses one replica/worker and a 500 MB volume mounted at `/data`; the saved schedule remained present after the WebRTC redeploy. Container restart logs confirm graceful shutdown followed by a fresh application startup. Evidence is kept in local ignored browser reports and `artifacts/`.
@@ -297,6 +326,17 @@ If Chrome is not installed, run `npx.cmd playwright install chromium` and omit t
 Use **Vercel frontend + Railway backend with a persistent volume**. The Docker image runs one Uvicorn worker; the signaling registry is process-local. Multiple workers/replicas need a shared signaling design.
 
 The following steps also describe how to reproduce the deployment in your own account. Account login, GitHub installation access, billing eligibility, and any paid upgrade must be handled by the account owner. No paid upgrade is required by the application itself.
+
+### Updating the existing deployment with this release
+
+1. Push the reviewed focused commits to a review branch and let GitHub Actions pass before merging to `main`. The local release passed all checks; do not treat the older green CI run as validation of new commits.
+2. With no active call, deploy the new `main` revision of Railway `zoom-api` (root `/backend`) while keeping the existing `/data` volume and variables. Restarting the signaling process ends active calls. If GitHub changes do not trigger Railway, use its Deploy Latest Commit action; restarting an old deployment does not update its source.
+3. Deploy the same revision on Vercel (root `frontend`). Keep `NEXT_PUBLIC_API_BASE_URL=https://zoom-clone-api.up.railway.app`. Screen-sharing roster state and chat require the matching backend release; avoid verifying a mixed frontend/backend version.
+4. Keep Railway `FRONTEND_URL` and `CORS_ORIGINS` at `https://zoom-clone-vansh.vercel.app`, `DATABASE_URL=sqlite:////data/zoom.db`, `SEED_DATA=true`, one worker/replica, and `ICE_TRANSPORT_POLICY=all`. No new required environment variable or schema migration is needed.
+5. Verify `/api/health`, public frontend access, all four mandatory workflows, two-person audio/video, chat, and share/stop/camera restoration. Run the production browser command below, then perform the physical-device checklist. Confirm a saved schedule survives a Railway restart and samples remain idempotent.
+6. Hosted TURN remains manual: provide your provider's relay URLs and username/credential in Railway `ICE_SERVERS_JSON`, apply/redeploy, and verify forced-relay tests. Never commit credentials. Public STUN alone does not guarantee every Wi-Fi/NAT combination.
+
+For native screen-sharing verification: join with two desktop browsers, share a harmless tab/window, confirm the remote content and microphone speech, click Stop Share, repeat using the browser's own Stop Sharing control, cancel the picker, and repeat with the camera disabled. Confirm the camera's prior state returns each time. On unsupported mobile browsers, confirm the clear error and continued camera/audio operation.
 
 ### 1. Create the Railway backend
 
@@ -391,7 +431,9 @@ For database backups, use SQLite's online backup API or stop the backend before 
 
 - Verified room capacity is two. Six-person configuration is available but unverified.
 - STUN is included; restrictive NAT/firewall combinations may require TURN.
-- Manual ICE restart and diagnostics are available. No automatic restart, seamless session recovery, durable signaling, account authentication, chat, recording, or screen sharing.
+- Manual ICE restart and diagnostics are available. No automatic restart, seamless session recovery, durable signaling, account authentication, recording, or virtual backgrounds.
+- Screen sharing replaces camera video while active; microphone speech continues, but shared tab/system audio is not included. Browser source selection and OS permissions need manual verification; mobile browser support varies.
+- Chat is transient, retains the latest 100 messages per browser, and has no history for new arrivals or after refresh.
 - The default organizer and dashboard data are shared across visitors, as allowed by the assignment. Meeting IDs are invitations, not secrets. The public demo is unsuitable for confidential meetings.
 - SQLite and an in-process registry are appropriate for this single-instance assignment. Production scale needs identity, abuse controls, migrations/backups, shared state, and an SFU.
 - Browser storage is required to retain host rights; no account recovery flow is provided.

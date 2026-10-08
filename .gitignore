@@ -20,9 +20,8 @@ artifacts/
 *.tsbuildinfo
 .DS_Store
 
-# Local preparation notes; README.md is the submission documentation.
+# Local preparation notes; README and interview notes are submission documentation.
 /IMPLEMENTATION_CHECKLIST.md
-/INTERVIEW_NOTES.md
 /SUBMISSION_CHECKLIST.md
 /TEST_RESULTS.md
 /deployment/DEPLOYMENT.md
