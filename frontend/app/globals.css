@@ -443,6 +443,14 @@ select {
   border-radius: 100%;
   background: #73b694;
 }
+.connection-offline > span,
+.subtle-status.status-offline {
+  background: #dc4446;
+}
+.connection-pending > span,
+.subtle-status.status-pending {
+  background: #a1a4af;
+}
 .meeting-panels {
   display: grid;
   grid-template-columns: 1.08fr 1fr;

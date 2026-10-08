@@ -315,9 +315,11 @@ export function Dashboard({ view }: { view: "home" | "meetings" }) {
           <span className="search-hint">Meetings</span>
         </div>
         <div className="header-right">
-          <span className="connection-label">
+          <span
+            className={`connection-label ${error ? "connection-offline" : loading ? "connection-pending" : ""}`}
+          >
             <span />
-            {error ? "Offline" : "Available"}
+            {error ? "Offline" : loading ? "Connecting" : "Available"}
           </span>
           <button
             className="icon-button header-settings"
@@ -442,8 +444,14 @@ export function Dashboard({ view }: { view: "home" | "meetings" }) {
                 </button>
               </div>
               <p className="hero-caption">
-                <span className="subtle-status" />
-                Ready when you are.
+                <span
+                  className={`subtle-status ${error ? "status-offline" : loading ? "status-pending" : ""}`}
+                />
+                {error
+                  ? "Waiting for the meeting server."
+                  : loading
+                    ? "Connecting to your workspace…"
+                    : "Ready when you are."}
               </p>
             </section>
           ) : (
