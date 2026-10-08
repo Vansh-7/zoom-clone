@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, WebSocket
+from fastapi import APIRouter, Depends, Header, Response, WebSocket
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -127,9 +127,11 @@ async def end(code: str, db: DB, token: Token):
 
 
 @router.get("/rtc-config")
-def rtc_config():
+def rtc_config(response: Response):
+    response.headers["Cache-Control"] = "no-store"
     return {
         "ice_servers": get_settings().ice_servers,
+        "ice_transport_policy": get_settings().ice_transport_policy,
         "max_participants": get_settings().max_participants,
     }
 

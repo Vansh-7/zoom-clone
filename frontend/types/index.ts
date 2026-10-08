@@ -44,5 +44,6 @@ export interface ScheduleInput {
 }
 export interface RtcConfig {
   ice_servers: RTCIceServer[];
+  ice_transport_policy?: RTCIceTransportPolicy;
   max_participants: number;
 }
