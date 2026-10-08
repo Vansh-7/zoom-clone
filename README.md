@@ -97,6 +97,7 @@ On macOS/Linux, use `python3 -m venv .venv`, `.venv/bin/python`, `cp`, and `npm`
 | `MAX_PARTICIPANTS`         | Backend              | `2` verified; validation permits up to 6, but larger rooms have not been acceptance-tested |
 | `DISCONNECT_GRACE_SECONDS` | Backend              | `30`; grace before ending a call after host socket loss                                    |
 | `ICE_SERVERS_JSON`         | Backend              | JSON array of WebRTC ICE servers; default public Google STUN                               |
+| `ICE_TRANSPORT_POLICY`     | Backend              | `all` for direct/relay candidates; `relay` forces TURN for diagnostics                      |
 | `PORT`                     | Container            | Platform HTTP port, default 8000                                                           |
 | `RAILWAY_RUN_UID`          | Railway only         | `0` so the process can write Railway's root-owned volume                                   |
 
@@ -188,14 +189,58 @@ WebSocket events include `welcome`, `participant-joined`, `participant-left`, `m
 
 An instant meeting abandoned before its host joins can remain active until the host returns and ends it or the backend restarts. No complex recovery or lifecycle scheduler was added ahead of mandatory features.
 
+## Media connectivity and TURN setup
+
+A connected WebSocket and a visible participant roster confirm signaling, not a working media path. A delayed-negotiation regression reproduced two concurrent offers for one peer; signaling handlers now run in order, with an offer guard. ICE candidates wait for the matching remote description, including after an ICE restart. End-of-candidates messages are forwarded. This fixes a reproducible negotiation defect; it does not establish the cause of an earlier laptop-to-laptop failure without that session's ICE evidence.
+
+If media fails, select **Copy connection diagnostics** in the meeting error message on **both laptops**. The report contains negotiation/ICE states, candidate-type counts, ICE server error codes, selected candidate types/protocol, and inbound RTP packet counts. It excludes candidate addresses, SDP, meeting capabilities, and TURN credentials. **Retry media connection** requests a new ICE generation without leaving the room. Browser console entries prefixed `[WebRTC]` and Railway `rtc_signal` logs distinguish negotiation failures from connectivity failures. A single ICE-server error can be nonfatal if another path succeeds; [error 701 indicates that a STUN/TURN server could not be reached](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/icecandidateerror_event).
+
+Production currently has Google STUN only. Wi-Fi client isolation, firewall rules, blocked STUN, or incompatible NAT behavior can prevent direct media even when signaling works. A TURN relay is the fallback when direct paths cannot connect; Railway's HTTPS/WebSocket endpoint is not a TURN relay. The app supports provider-supplied authenticated TURN over UDP/TCP and TLS without changing frontend code.
+
+To enable a hosted relay manually:
+
+1. Obtain a TURN hostname, supported ports/transports, **username**, and **credential/password** from your TURN provider or your own coturn server. Use the provider's actual endpoints; the example below assumes UDP/TCP on 3478 and TLS on 443 are supported. Do not use a provider's administrative API key as the browser credential.
+2. In Railway → `zoom-api` → Variables, replace **ICE_SERVERS_JSON** with a JSON array like this. Paste raw JSON without surrounding shell quotes, replacing every placeholder:
+
+```json
+[
+  { "urls": "stun:stun.l.google.com:19302" },
+  {
+    "urls": [
+      "turn:YOUR-TURN-HOST:3478?transport=udp",
+      "turn:YOUR-TURN-HOST:3478?transport=tcp",
+      "turns:YOUR-TURN-HOST:443?transport=tcp"
+    ],
+    "username": "YOUR-TURN-USERNAME",
+    "credential": "YOUR-TURN-PASSWORD"
+  }
+]
+```
+
+3. Leave **ICE_TRANSPORT_POLICY=all** for normal use. This allows direct media and TURN fallback. For a temporary diagnostic, `relay` forces TURN and requires a configured TURN entry. Invalid JSON, URLs, or missing TURN credentials now fail configuration validation at startup instead of failing silently in browsers.
+4. Apply the variables/redeploy, then rejoin with both laptops so new peer connections receive the configuration. The `/api/rtc-config` response must contain the intended endpoints and policy; inspect it privately because TURN credentials must be delivered to browsers. Responses are marked `no-store`. No Vercel rebuild is needed for ICE variable changes.
+5. Run the relay-only test below. It forces relay policy in its browser contexts and requires a selected **relay** candidate plus real inbound audio/video in both directions. A gathered relay candidate alone is insufficient. Without configured TURN it explicitly **skips**, rather than passing.
+
+```powershell
+cd frontend
+$env:E2E_FRONTEND_URL='https://zoom-clone-vansh.vercel.app'
+$env:E2E_API_URL='https://zoom-clone-api.up.railway.app'
+$env:E2E_BROWSER_CHANNEL='chrome'
+npm.cmd run test:e2e -- tests/rtc.spec.ts --grep 'relay-only'
+```
+
+For testing a separate relay without modifying production, set `E2E_RTC_CONFIG_FILE` to an ignored JSON file under `artifacts/` containing `{ "ice_servers": [...] }`. Keep real credentials out of Git. Browser-visible static TURN credentials can be reused by visitors; use restricted/short-lived credentials, monitor relay quotas, and rotate them. A public production service should issue expiring TURN credentials to authorized participants.
+
+The automated failure/retry test substitutes unreachable media candidates while keeping real signaling connected, then restores candidates and verifies RTP recovery. Separate UDP and TCP relay tests passed using a temporary authenticated local coturn fixture. Hosted TURN, TURN over TLS, and your physical laptops/networks remain unverified.
+
 ## Verification
 
 The following checks were executed locally on 8–9 October 2026:
 
 | Check                                                    | Result                                                                                                           |
 | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Backend API, database, and signaling tests               | 25 passed on Windows; backend CI also passed on Linux                                                           |
-| Browser acceptance tests against the production build    | 6 passed, including bidirectional synthetic audio/video, scheduling, host controls, and mobile permission denial |
+| Backend API, database, and signaling tests               | 37 passed on Windows; backend CI also passed on Linux                                                           |
+| Browser acceptance tests against the production build    | 9 passed, including failed-ICE recovery, authenticated UDP/TCP relay RTP, and all existing meeting workflows       |
 | TypeScript, ESLint, Prettier, Ruff, and production build | Passed                                                                                                           |
 | SQLite persistence                                       | Scheduled records survived backend and container restarts; six seed identities and timestamps remained unchanged |
 | Production dependency audit                              | 0 vulnerabilities reported                                                                                       |
@@ -208,16 +253,16 @@ Cloud verification completed on **9 October 2026 (India time)** against the link
 | HTTPS API health and Swagger                                    | Both return 200; health confirms SQLite                                                                                                      |
 | CORS                                                            | Exact frontend origin accepted; unrelated origin rejected                                                                                    |
 | Dashboard, instant creation, ID/direct-link joining, scheduling | Passed against the real deployed API and database                                                                                            |
-| Full browser acceptance suite                                   | **6 passed** on the renamed production domains, including timezone hydration and participant departure checks                               |
+| Full browser acceptance suite                                   | **7 passed, 2 skipped** on production; relay tests skip because hosted TURN credentials are not configured                                    |
 | Two-person WebRTC over production WSS signaling                 | Both contexts received nonzero real audio/video RTP packets and decoded remote video frames using synthetic devices                         |
-| Host controls and meeting cleanup                               | Mute-all, unmute, remove, leave/rejoin, and end-for-all passed                                                                               |
+| Host controls, ICE recovery, and meeting cleanup                 | Mute-all, unmute, remove, leave/rejoin, end-for-all, duplicate joins, ICE-before-SDP ordering, and failed-ICE retry passed                    |
 | Persistent Railway SQLite volume                                | Saved schedule `20264058542` retained its title, UTC time, duration, and other fields after restart; all six seed records remained identical |
 | Desktop/tablet/mobile                                           | 1440, 768, and 390 px layouts and dialogs passed overflow/interaction checks and were visually reviewed                                      |
-| CI with hydration, notification, and departure regression coverage | [Passed](https://github.com/Vansh-7/zoom-clone/actions/runs/37828438158)                                                                     |
+| CI with meeting, ICE failure/retry, and negotiation regression coverage | [Passed](https://github.com/Vansh-7/zoom-clone/actions/runs/37835540483)                                                                     |
 
-Application code at `5260023` was verified on both deployed services. Frontend API configuration, backend invitation URLs, and CORS use the new production domains linked above. The previous frontend address redirects to the new address while preserving invitation paths. Railway uses one replica/worker and a 500 MB volume mounted at `/data`; the saved schedule remained present after the latest redeploy. Container restart logs confirm graceful shutdown followed by a fresh application startup. Evidence is kept in local ignored browser reports and `artifacts/`.
+Application code at `d54a6d1` was verified on both deployed services; `ec61145` only waits for asynchronous clipboard confirmation in the diagnostic test. Frontend API configuration, backend invitation URLs, and CORS use the production domains linked above. The previous frontend address redirects to the new address while preserving invitation paths. Railway uses one replica/worker and a 500 MB volume mounted at `/data`; the saved schedule remained present after the WebRTC redeploy. Container restart logs confirm graceful shutdown followed by a fresh application startup. Evidence is kept in local ignored browser reports and `artifacts/`.
 
-**Not verified:** physical camera/microphone quality, participants on different networks, TURN relay behavior, Safari/Firefox, or rooms larger than two. Synthetic media proves actual WebRTC transport/decoding between two browser contexts; it does not establish these separate outcomes.
+**Not verified:** physical camera/microphone quality, your two laptops/networks, hosted TURN/TLS relay behavior, Safari/Firefox, or rooms larger than two. Local UDP/TCP relay and synthetic media tests prove actual transport/decoding between two browser contexts; they do not establish these separate outcomes.
 
 Backend tests use temporary SQLite files. Browser tests create real records in the development database and inspect nonzero inbound audio/video RTP packets in both browser contexts. [GitHub Actions](https://github.com/Vansh-7/zoom-clone/actions/workflows/ci.yml) runs backend, frontend, and browser checks on pushes and pull requests. The backend test adapter emits a Starlette deprecation warning; all tests pass.
 
@@ -285,6 +330,7 @@ DISCONNECT_GRACE_SECONDS=30
 PORT=8000
 RAILWAY_RUN_UID=0
 ICE_SERVERS_JSON=[{"urls":"stun:stun.l.google.com:19302"}]
+ICE_TRANSPORT_POLICY=all
 ```
 
 Railway volumes are root-owned; its [documented `RAILWAY_RUN_UID=0` setting](https://docs.railway.com/volumes#permissions) lets this container write the mounted database. Other hosts can provision a volume writable by the image's application user. Initialize and seed at application startup, when the volume is mounted. Verify persistent-volume eligibility and available account credits before deployment.
@@ -345,7 +391,7 @@ For database backups, use SQLite's online backup API or stop the backend before 
 
 - Verified room capacity is two. Six-person configuration is available but unverified.
 - STUN is included; restrictive NAT/firewall combinations may require TURN.
-- No automatic ICE restart, seamless session recovery, durable signaling, account authentication, chat, recording, or screen sharing.
+- Manual ICE restart and diagnostics are available. No automatic restart, seamless session recovery, durable signaling, account authentication, chat, recording, or screen sharing.
 - The default organizer and dashboard data are shared across visitors, as allowed by the assignment. Meeting IDs are invitations, not secrets. The public demo is unsuitable for confidential meetings.
 - SQLite and an in-process registry are appropriate for this single-instance assignment. Production scale needs identity, abuse controls, migrations/backups, shared state, and an SFU.
 - Browser storage is required to retain host rights; no account recovery flow is provided.
