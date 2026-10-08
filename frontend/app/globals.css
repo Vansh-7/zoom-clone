@@ -1889,6 +1889,47 @@ select {
   position: absolute;
   inset: 0;
 }
+.screen-tile video {
+  object-fit: contain;
+  background: #111;
+}
+.tile-sharing {
+  color: #91e7b2;
+}
+.toolbar-share {
+  color: #76da9d;
+}
+.sharing-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #c6f6d7;
+  background: #174b31;
+  border-radius: 5px;
+  font-size: 12px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+.sharing-banner button {
+  background: #b92e3c;
+  color: #fff;
+  border-radius: 4px;
+  padding: 5px 10px;
+}
+@media (min-width: 1001px) {
+  .video-grid:has(.screen-tile) {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+    align-items: center;
+  }
+  .video-grid-solo:has(.screen-tile) {
+    grid-template-columns: 1fr;
+  }
+  .screen-tile {
+    order: -1;
+  }
+}
 .video-hidden {
   opacity: 0;
 }

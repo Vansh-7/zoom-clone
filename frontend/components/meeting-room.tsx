@@ -19,6 +19,7 @@ import {
   LockKeyhole,
   Mic,
   MicOff,
+  MonitorUp,
   ShieldCheck,
   Signal,
   Users,
@@ -36,6 +37,7 @@ import {
 } from "@/lib/meetings";
 import { useLocalMedia } from "@/hooks/use-local-media";
 import { useConference } from "@/hooks/use-conference";
+import { useScreenShare } from "@/hooks/use-screen-share";
 import type { Admission, Meeting, Participant } from "@/types";
 import { MeetingDetails } from "./meeting-dialogs";
 import { ErrorNotice, Modal, Spinner, useToast } from "./ui";
@@ -63,7 +65,7 @@ function VideoTile({
   }, [stream]);
   return (
     <div
-      className={`video-tile ${local ? "local-tile" : ""}`}
+      className={`video-tile ${local ? "local-tile" : ""} ${participant.screen_sharing ? "screen-tile" : ""}`}
       data-participant-id={participant.id}
     >
       <video
@@ -71,7 +73,7 @@ function VideoTile({
         autoPlay
         playsInline
         muted={local}
-        className={`${local ? "mirrored" : ""} ${videoEnabled && stream ? "" : "video-hidden"}`}
+        className={`${local && !participant.screen_sharing ? "mirrored" : ""} ${videoEnabled && stream ? "" : "video-hidden"}`}
         aria-label={`${participant.display_name}${local ? " (you)" : ""} video`}
       />
       {(!videoEnabled || !stream) && (
@@ -96,6 +98,9 @@ function VideoTile({
           {local ? " (You)" : ""}
         </span>
         {participant.role === "host" && <span className="tile-host">Host</span>}
+        {participant.screen_sharing && (
+          <span className="tile-sharing">Sharing screen</span>
+        )}
       </div>
       {autoplayBlocked && (
         <button
@@ -129,14 +134,16 @@ export function MeetingRoom({ code }: { code: string }) {
   const [leaving, setLeaving] = useState(false);
   const [duration, setDuration] = useState(0);
   const media = useLocalMedia();
+  const screen = useScreenShare(media.stream);
   const conference = useConference(
     code,
     admission,
-    media.stream,
+    screen.stream,
     media.audioEnabled,
-    media.videoEnabled,
+    screen.sharing || media.videoEnabled,
     media.muteAudio,
     notify,
+    screen.sharing,
   );
 
   const load = useCallback(async () => {
@@ -179,9 +186,13 @@ export function MeetingRoom({ code }: { code: string }) {
     return () => clearInterval(timer);
   }, [waiting, code]);
   const stopMedia = media.stop;
+  const stopScreen = screen.stop;
   useEffect(() => {
-    if (conference.terminal) stopMedia();
-  }, [conference.terminal, stopMedia]);
+    if (conference.terminal) {
+      stopScreen();
+      stopMedia();
+    }
+  }, [conference.terminal, stopMedia, stopScreen]);
 
   async function join(event: FormEvent) {
     event.preventDefault();
@@ -218,6 +229,7 @@ export function MeetingRoom({ code }: { code: string }) {
       if (endForAll && ownerToken) await api.end(code, ownerToken);
       else if (admission) await api.leave(code, admission.participant_token);
       media.stop();
+      screen.stop();
       router.push("/");
     } catch (error) {
       setError(errorMessage(error));
@@ -489,6 +501,12 @@ export function MeetingRoom({ code }: { code: string }) {
       </header>
       <div className="room-content">
         <main className="meeting-stage">
+          {screen.sharing && (
+            <div className="sharing-banner" role="status">
+              <MonitorUp size={16} /> You are sharing your screen
+              <button onClick={screen.stop}>Stop Share</button>
+            </div>
+          )}
           {conference.error || error ? (
             <div className="room-error" role="alert">
               <span>{conference.error || error}</span>
@@ -525,10 +543,14 @@ export function MeetingRoom({ code }: { code: string }) {
             className={`video-grid ${others.length === 0 ? "video-grid-solo" : ""}`}
           >
             <VideoTile
-              stream={media.stream}
-              participant={{ ...self, audio_enabled: media.audioEnabled }}
+              stream={screen.stream}
+              participant={{
+                ...self,
+                audio_enabled: media.audioEnabled,
+                screen_sharing: screen.sharing,
+              }}
               local
-              videoEnabled={media.videoEnabled}
+              videoEnabled={screen.sharing || media.videoEnabled}
             />
             {others.map((participant) => (
               <VideoTile
@@ -652,6 +674,21 @@ export function MeetingRoom({ code }: { code: string }) {
           </button>
         </div>
         <div className="toolbar-center">
+          <button
+            className={`toolbar-control toolbar-share ${screen.sharing ? "toolbar-active" : ""}`}
+            disabled={screen.pending || conference.connection !== "connected"}
+            onClick={() => {
+              if (screen.sharing) screen.stop();
+              else
+                void screen
+                  .start()
+                  .catch((error) => notify(errorMessage(error)));
+            }}
+            aria-label={screen.sharing ? "Stop sharing screen" : "Share screen"}
+          >
+            <MonitorUp size={24} />
+            <span>{screen.sharing ? "Stop Share" : "Share Screen"}</span>
+          </button>
           <button
             className={`toolbar-control ${rosterOpen ? "toolbar-active" : ""}`}
             onClick={() => setRosterOpen(!rosterOpen)}

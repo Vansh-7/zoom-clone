@@ -51,11 +51,17 @@ export function useConference(
   videoEnabled: boolean,
   onMute: () => void,
   notify: (message: string) => void,
+  screenSharing = false,
 ) {
   const socketRef = useRef<WebSocket | null>(null);
   const retryRef = useRef<(() => Promise<void>) | null>(null);
   const peers = useRef(new Map<number, Peer>());
-  const mediaRef = useRef({ stream, audioEnabled, videoEnabled });
+  const mediaRef = useRef({
+    stream,
+    audioEnabled,
+    videoEnabled,
+    screenSharing,
+  });
   const muteRef = useRef(onMute);
   const notifyRef = useRef(notify);
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -72,7 +78,7 @@ export function useConference(
     notifyRef.current = notify;
   }, [onMute, notify]);
   useEffect(() => {
-    mediaRef.current = { stream, audioEnabled, videoEnabled };
+    mediaRef.current = { stream, audioEnabled, videoEnabled, screenSharing };
     for (const { pc } of peers.current.values()) {
       for (const kind of ["audio", "video"]) {
         const sender = pc
@@ -98,9 +104,10 @@ export function useConference(
           type: "media-state",
           audio_enabled: audioEnabled,
           video_enabled: videoEnabled,
+          screen_sharing: screenSharing,
         }),
       );
-  }, [stream, audioEnabled, videoEnabled]);
+  }, [stream, audioEnabled, videoEnabled, screenSharing]);
 
   useEffect(() => {
     if (!admission) return;
@@ -285,6 +292,7 @@ export function useConference(
                   type: "media-state",
                   audio_enabled: mediaRef.current.audioEnabled,
                   video_enabled: mediaRef.current.videoEnabled,
+                  screen_sharing: mediaRef.current.screenSharing,
                 });
                 for (const participant of message.participants ?? [])
                   await offer(participant.id);

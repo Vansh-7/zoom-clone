@@ -90,10 +90,25 @@ def test_signaling_roster_host_controls_and_revocation(client):
             assert guest_ws.receive_json()["type"] == "mute-request"
             assert host_ws.receive_json()["type"] == "notice"
             guest_ws.send_json(
-                {"type": "media-state", "audio_enabled": False, "video_enabled": True}
+                {
+                    "type": "media-state",
+                    "audio_enabled": False,
+                    "video_enabled": True,
+                    "screen_sharing": True,
+                }
             )
-            assert guest_ws.receive_json()["participant"]["video_enabled"] is True
+            state = guest_ws.receive_json()["participant"]
+            assert state["video_enabled"] is True and state["screen_sharing"] is True
             assert host_ws.receive_json()["type"] == "media-state"
+            guest_ws.send_json(
+                {
+                    "type": "media-state",
+                    "audio_enabled": False,
+                    "video_enabled": True,
+                    "screen_sharing": "yes",
+                }
+            )
+            assert guest_ws.receive_json()["code"] == "INVALID_MESSAGE"
             host_ws.send_json(
                 {"type": "remove-participant", "target": guest["participant"]["id"]}
             )

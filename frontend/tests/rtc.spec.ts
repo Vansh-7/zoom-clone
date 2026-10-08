@@ -147,6 +147,149 @@ async function packets(page: Page) {
   });
 }
 
+test("screen sharing replaces video, preserves audio, and restores camera", async ({
+  browser,
+  request,
+}) => {
+  const room = await pair(browser, request, {
+    ice_servers: [],
+    ice_transport_policy: "all",
+  });
+  try {
+    const { host, guest } = room;
+    await expect
+      .poll(async () => (await packets(guest)).video)
+      .toBeGreaterThan(0);
+    const original = await host.evaluate(() => {
+      const pc = (window as unknown as { __testPeers: RTCPeerConnection[] })
+        .__testPeers[0];
+      return {
+        audio: pc.getSenders().find((s) => s.track?.kind === "audio")?.track
+          ?.id,
+        video: pc.getSenders().find((s) => s.track?.kind === "video")?.track
+          ?.id,
+      };
+    });
+    // A synthetic canvas is the selected source; capture and RTP transport are real.
+    await host.evaluate(() => {
+      let cancel = true;
+      Object.defineProperty(navigator.mediaDevices, "getDisplayMedia", {
+        configurable: true,
+        value: async () => {
+          if (cancel) {
+            cancel = false;
+            throw new DOMException("Cancelled", "NotAllowedError");
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = 1280;
+          canvas.height = 720;
+          const ctx = canvas.getContext("2d")!;
+          ctx.fillStyle = "#1565e0";
+          ctx.fillRect(0, 0, 1280, 720);
+          ctx.fillStyle = "white";
+          ctx.font = "48px sans-serif";
+          ctx.fillText("Shared presentation", 80, 120);
+          const capture = canvas.captureStream(15);
+          Object.defineProperty(window, "__displayTrack", {
+            configurable: true,
+            value: capture.getVideoTracks()[0],
+          });
+          return capture;
+        },
+      });
+    });
+    await host
+      .getByRole("button", { name: "Share screen", exact: true })
+      .click();
+    await expect(host.getByRole("status").last()).toContainText(
+      "cancelled or blocked",
+    );
+    await host
+      .getByRole("button", { name: "Share screen", exact: true })
+      .click();
+    await expect(guest.locator(".screen-tile")).toContainText("Sharing screen");
+    await expect
+      .poll(() =>
+        guest
+          .locator(".screen-tile video")
+          .evaluate((video: HTMLVideoElement) => {
+            const canvas = document.createElement("canvas");
+            canvas.width = 1;
+            canvas.height = 1;
+            const ctx = canvas.getContext("2d")!;
+            ctx.drawImage(video, 0, 0, 1, 1);
+            const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+            return b > 150 && b > r * 2 && g > 50;
+          }),
+      )
+      .toBe(true);
+    const during = await host.evaluate(() => {
+      const pc = (window as unknown as { __testPeers: RTCPeerConnection[] })
+        .__testPeers[0];
+      return {
+        audio: pc.getSenders().find((s) => s.track?.kind === "audio")?.track
+          ?.id,
+        video: pc.getSenders().find((s) => s.track?.kind === "video")?.track
+          ?.id,
+        state: pc.connectionState,
+      };
+    });
+    expect(during.audio).toBe(original.audio);
+    expect(during.video).not.toBe(original.video);
+    expect(during.state).toBe("connected");
+    await host.screenshot({ path: "../artifacts/screen-sharing.png" });
+    // Browser's native Stop Sharing event follows the same cleanup path.
+    await host.evaluate(() => {
+      const track = (window as unknown as { __displayTrack: MediaStreamTrack })
+        .__displayTrack;
+      track.stop();
+      track.dispatchEvent(new Event("ended"));
+    });
+    await expect(guest.locator(".screen-tile")).toHaveCount(0);
+    await expect
+      .poll(() =>
+        host.evaluate(
+          () =>
+            (
+              window as unknown as { __testPeers: RTCPeerConnection[] }
+            ).__testPeers[0]
+              .getSenders()
+              .find((s) => s.track?.kind === "video")?.track?.id,
+        ),
+      )
+      .toBe(original.video);
+    // Sharing works with the camera disabled and restores that disabled state.
+    await host.getByRole("button", { name: "Stop video", exact: true }).click();
+    await host
+      .getByRole("button", { name: "Share screen", exact: true })
+      .click();
+    await expect(guest.locator(".screen-tile")).toBeVisible();
+    await host
+      .getByRole("button", { name: "Stop sharing screen", exact: true })
+      .click();
+    await expect(guest.locator(".screen-tile")).toHaveCount(0);
+    await expect(
+      guest
+        .locator(".video-tile")
+        .filter({ hasText: "RTC host" })
+        .locator(".tile-placeholder"),
+    ).toBeVisible();
+    const audioBefore = (await packets(guest)).audio;
+    await expect
+      .poll(async () => (await packets(guest)).audio)
+      .toBeGreaterThan(audioBefore);
+    await host.setViewportSize({ width: 390, height: 844 });
+    expect(
+      await host.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await host.screenshot({ path: "../artifacts/meeting-mobile.png" });
+  } finally {
+    await room.close();
+  }
+});
+
 test("ICE failure diagnostics and retry recover without leaving the room", async ({
   browser,
   request,

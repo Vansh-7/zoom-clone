@@ -25,6 +25,7 @@ class Connection:
     role: str
     audio_enabled: bool = False
     video_enabled: bool = False
+    screen_sharing: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def public(self):
@@ -34,6 +35,7 @@ class Connection:
             "role": self.role,
             "audio_enabled": self.audio_enabled,
             "video_enabled": self.video_enabled,
+            "screen_sharing": self.screen_sharing,
         }
 
     async def send(self, message: dict):
@@ -242,8 +244,12 @@ class RoomManager:
                             message.get("audio_enabled"), bool
                         ) or not isinstance(message.get("video_enabled"), bool):
                             raise ValueError("Media state must use booleans")
+                        sharing = message.get("screen_sharing", False)
+                        if not isinstance(sharing, bool):
+                            raise ValueError("Screen sharing state must use a boolean")
                         connection.audio_enabled = message["audio_enabled"]
                         connection.video_enabled = message["video_enabled"]
+                        connection.screen_sharing = sharing and connection.video_enabled
                         await self.broadcast(
                             code,
                             {"type": "media-state", "participant": connection.public()},

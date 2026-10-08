@@ -275,9 +275,7 @@ def test_samples_replenish_days_later_without_rewriting_history(client):
         assert len(upcoming) == 3
         assert all(m["can_claim"] for m in upcoming)
         assert all(
-            datetime.fromisoformat(
-                m["scheduled_at"].replace("Z", "+00:00")
-            )
+            datetime.fromisoformat(m["scheduled_at"].replace("Z", "+00:00"))
             > now + timedelta(days=7)
             for m in upcoming
         )

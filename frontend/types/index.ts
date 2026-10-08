@@ -29,6 +29,7 @@ export interface Participant {
   role: "host" | "guest";
   audio_enabled?: boolean;
   video_enabled?: boolean;
+  screen_sharing?: boolean;
 }
 export interface Admission {
   participant: Participant;
