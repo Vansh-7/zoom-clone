@@ -1061,6 +1061,9 @@ select {
   transform: translate(-50%, 0);
   pointer-events: auto;
 }
+.meeting-room ~ .toast {
+  bottom: 92px;
+}
 .toast > svg {
   color: #76d4ad;
   flex: none;

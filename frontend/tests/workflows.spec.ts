@@ -253,6 +253,13 @@ test("two-person audio/video, mute, leave, removal, and end for all", async ({
   await expect(host.locator(".room-connection")).toContainText("Connected");
   await host.getByRole("button", { name: "Invite", exact: true }).click();
   await expect(host.getByRole("status").last()).toContainText("copied");
+  await expect
+    .poll(async () => {
+      const toast = await host.locator(".toast-visible").boundingBox();
+      const toolbar = await host.locator(".meeting-toolbar").boundingBox();
+      return !!toast && !!toolbar && toast.y + toast.height <= toolbar.y;
+    })
+    .toBe(true);
   await guest.goto(invite);
   await guest.getByLabel("Your name", { exact: true }).fill("Jordan Lee");
   await guest
