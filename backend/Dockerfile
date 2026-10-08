@@ -8,4 +8,4 @@ RUN useradd --create-home appuser && mkdir /data && chown appuser:appuser /data
 USER appuser
 ENV DATABASE_URL=sqlite:////data/zoom.db
 EXPOSE 8000
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
+CMD ["python", "-m", "app.server", "--host", "0.0.0.0"]
