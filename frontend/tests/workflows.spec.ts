@@ -21,41 +21,39 @@ test("dashboard, join validation, scheduling, and persistence", async ({
   });
   await page
     .getByRole("region", { name: "Meeting actions" })
-    .getByRole("button", { name: "Join", exact: true })
+    .getByRole("link", { name: "Join", exact: true })
     .click();
   await page.getByLabel("Meeting ID or invitation link").fill("11111111111");
   await page.getByLabel("Your name", { exact: true }).fill("Test Guest");
   await page.getByRole("button", { name: "Join Meeting", exact: true }).click();
-  await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
+  await expect(page.locator(".join-page").getByRole("alert")).toContainText(
     "doesn't exist",
   );
   await page
     .getByLabel("Meeting ID or invitation link")
     .fill("https://unrelated.example/meeting/12345678901");
   await page.getByRole("button", { name: "Join Meeting", exact: true }).click();
-  await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
+  await expect(page.locator(".join-page").getByRole("alert")).toContainText(
     "invitation from this app",
   );
-  await page.getByRole("button", { name: "Close dialog" }).click();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await page
     .getByRole("region", { name: "Meeting actions" })
-    .getByRole("button", { name: "Schedule", exact: true })
+    .getByRole("link", { name: "Schedule", exact: true })
     .click();
   const title = `E2E review ${Date.now()}`;
   const tomorrow = new Date(Date.now() + 86400000);
   const date = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
   await page.getByLabel(/Topic/).fill(title);
+  await page.getByRole("button", { name: "Add Description" }).click();
   await page
     .getByLabel(/Description/)
     .fill("Persisted from the browser scheduling form.");
   await page.getByLabel("Date", { exact: true }).fill(date);
   await page.getByLabel("Time", { exact: true }).fill("14:30");
   await page.getByLabel("Duration").selectOption("45");
-  await page.screenshot({ path: screenshot("schedule-dialog.png") });
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Schedule", exact: true })
-    .click();
+  await page.screenshot({ path: screenshot("schedule-page.png") });
+  await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Your meeting is scheduled" }),
   ).toBeVisible();
@@ -67,9 +65,10 @@ test("dashboard, join validation, scheduling, and persistence", async ({
     .click();
   await expect(page.getByRole("status").last()).toContainText("copied");
   await page.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(page).toHaveURL(/\/meetings$/);
   await page.reload();
   await expect(
-    page.getByRole("button", { name: title, exact: true }),
+    page.locator(".manager-meeting").filter({ hasText: title }),
   ).toBeVisible();
   const code = invitation.split("/").pop();
   const record = await request.get(`${API}/api/meetings/${code}`);
@@ -82,31 +81,149 @@ test("dashboard, join validation, scheduling, and persistence", async ({
   expect(errors).toEqual([]);
 });
 
-test("responsive dashboard and dialogs have no horizontal overflow", async ({
+test("responsive pages support meeting selection without horizontal overflow", async ({
   page,
 }) => {
   for (const width of [1440, 768, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
     await page.goto("/");
     await expect(page.locator(".meeting-row").first()).toBeVisible();
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= innerWidth,
-      ),
-    ).toBe(true);
     await page.screenshot({
       path: screenshot(`dashboard-${width}.png`),
       fullPage: true,
     });
     await page
       .getByRole("region", { name: "Meeting actions" })
-      .getByRole("button", { name: "Join", exact: true })
+      .getByRole("link", { name: "Join", exact: true })
       .click();
-    await expect(page.getByRole("dialog")).toBeVisible();
-    await page.screenshot({ path: screenshot(`join-${width}.png`) });
-    await page.keyboard.press("Escape");
-    await expect(page.getByRole("dialog")).not.toBeVisible();
+    await expect(page).toHaveURL(/\/join$/);
+    await expect(
+      page.getByRole("button", { name: "Join Meeting", exact: true }),
+    ).toBeDisabled();
+    await page.screenshot({
+      path: screenshot(`join-${width}.png`),
+      fullPage: true,
+    });
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page
+      .getByRole("region", { name: "Meeting actions" })
+      .getByRole("link", { name: "Schedule", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/schedule$/);
+    await expect(
+      page.getByRole("button", { name: "Save", exact: true }),
+    ).toBeDisabled();
+    await page.screenshot({
+      path: screenshot(`schedule-${width}.png`),
+      fullPage: true,
+    });
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(page).toHaveURL(/\/meetings$/);
+    await expect(page.locator(".manager-meeting").first()).toBeVisible();
+    await page.screenshot({
+      path: screenshot(`meetings-${width}.png`),
+      fullPage: true,
+    });
+    const second = page.locator(".manager-meeting").nth(1);
+    const title = await second.locator("strong").textContent();
+    await second.click();
+    await expect(second).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(".manager-detail h2")).toHaveText(title!);
+    await page.getByText("Show Meeting Invitation", { exact: true }).click();
+    await expect(
+      page.getByLabel("Invitation link", { exact: true }),
+    ).toHaveValue(/\/meeting\/\d{11}$/);
+    await page
+      .getByRole("button", { name: "Copy Invitation", exact: true })
+      .click();
+    await expect(page.locator(".toast-visible")).toContainText("copied");
+    if (width === 390) {
+      await expect(page.locator(".manager-list")).not.toBeVisible();
+      await page.screenshot({
+        path: screenshot("meeting-detail-390.png"),
+        fullPage: true,
+      });
+      await page
+        .getByRole("button", { name: "Back to meetings", exact: true })
+        .click();
+      await expect(page.locator(".manager-list")).toBeVisible();
+    } else {
+      await expect(
+        page.getByRole("button", { name: "Back to meetings", exact: true }),
+      ).not.toBeVisible();
+    }
+    await page.getByRole("tab", { name: /Previous/ }).click();
+    await expect(page.locator(".manager-detail-actions .primary")).toHaveCount(
+      0,
+    );
+    if (width === 390) await page.locator(".manager-meeting").first().click();
+    await expect(page.locator(".manager-detail .status-badge")).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
   }
+});
+
+test("scheduling uses the browser timezone and keeps host access", async ({
+  browser,
+  request,
+}) => {
+  const context = await browser.newContext({ timezoneId: "America/New_York" });
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/schedule");
+  await page.getByLabel(/Topic/).fill("Timezone regression meeting");
+  const date = await page.evaluate(() => {
+    const day = new Date();
+    day.setDate(day.getDate() + 2);
+    return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+  });
+  await page.getByLabel("Date", { exact: true }).fill(date);
+  await page.getByLabel("Time", { exact: true }).fill("14:30");
+  await expect(page.locator(".schedule-timezone")).toContainText(
+    /\(GMT-0[45]:00\) New York/,
+  );
+  const expected = await page.evaluate(
+    (date) => new Date(`${date}T14:30:00`).toISOString(),
+    date,
+  );
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  const invitation = await page
+    .getByLabel("Invitation link", { exact: true })
+    .inputValue();
+  const code = invitation.split("/").pop()!;
+  const meeting = await (
+    await request.get(`${API}/api/meetings/${code}`)
+  ).json();
+  expect(new Date(meeting.scheduled_at).toISOString()).toBe(expected);
+  expect(meeting.scheduled_timezone).toBe("America/New_York");
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await page
+    .locator(".manager-meeting")
+    .filter({ hasText: "Timezone regression meeting" })
+    .click();
+  await expect(
+    page
+      .locator(".manager-detail")
+      .getByRole("button", { name: "Start Meeting", exact: true }),
+  ).toBeVisible();
+  await page
+    .locator(".manager-detail")
+    .getByRole("button", { name: "Start Meeting", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Start Meeting", exact: true }),
+  ).toBeVisible();
+  expect(errors).toEqual([]);
+  await request.post(`${API}/api/meetings/${code}/end`, {
+    headers: {
+      Authorization: `Bearer ${await page.evaluate((code) => localStorage.getItem(`zoom:host:${code}`), code)}`,
+    },
+  });
+  await context.close();
 });
 
 test("backend unavailable and empty states stay usable", async ({ page }) => {
@@ -136,6 +253,57 @@ test("backend unavailable and empty states stay usable", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "No recent meetings" }),
   ).toBeVisible();
+});
+
+test("Start Meeting claims a sample safely and meeting tabs support keyboard navigation", async ({
+  page,
+  request,
+}) => {
+  const meetings = await (
+    await request.get(`${API}/api/meetings/upcoming`)
+  ).json();
+  const sample = meetings.find(
+    (meeting: { can_claim: boolean }) => meeting.can_claim,
+  );
+  expect(
+    sample,
+    "The idempotent seed should provide an unclaimed upcoming sample",
+  ).toBeTruthy();
+  await page.goto("/meetings");
+  await page.getByRole("tab", { name: /Upcoming/ }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("tab", { name: /Previous/ })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await page.keyboard.press("ArrowLeft");
+  await page
+    .locator(".manager-meeting")
+    .filter({ hasText: sample.title })
+    .click();
+  await page
+    .locator(".manager-detail")
+    .getByRole("button", { name: "Start Meeting", exact: true })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`/meeting/${sample.meeting_code}$`));
+  const token = await page.evaluate(
+    (code) => localStorage.getItem(`zoom:host:${code}`),
+    sample.meeting_code,
+  );
+  expect(token).toBeTruthy();
+  await expect(
+    page.getByRole("button", { name: "Start Meeting", exact: true }),
+  ).toBeVisible();
+  expect(
+    (
+      await (
+        await request.get(`${API}/api/meetings/${sample.meeting_code}`)
+      ).json()
+    ).can_claim,
+  ).toBe(false);
+  await request.post(`${API}/api/meetings/${sample.meeting_code}/end`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
 });
 
 test("guest waits until the creating browser starts the meeting", async ({
@@ -311,6 +479,16 @@ test("two-person audio/video, mute, leave, removal, and end for all", async ({
     .getByRole("button", { name: "Start Meeting", exact: true })
     .click();
   await expect(host.locator(".room-connection")).toContainText("Connected");
+  const toolbar = await host.locator(".meeting-toolbar").boundingBox();
+  for (const button of await host.locator(".meeting-toolbar button").all()) {
+    const bounds = await button.boundingBox();
+    expect(
+      bounds &&
+        toolbar &&
+        bounds.y >= toolbar.y &&
+        bounds.y + bounds.height <= toolbar.y + toolbar.height,
+    ).toBe(true);
+  }
   await host.getByRole("button", { name: "Invite", exact: true }).click();
   await expect(host.getByRole("status").last()).toContainText("copied");
   await expect
@@ -363,6 +541,10 @@ test("two-person audio/video, mute, leave, removal, and end for all", async ({
     path: screenshot("meeting-two-person.png"),
     fullPage: true,
   });
+  await host.getByRole("link", { name: "Zoom Workplace Home" }).click();
+  await expect(host.getByRole("dialog")).toContainText("Leave this meeting?");
+  await host.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(host.locator(".video-tile")).toHaveCount(2);
   const mediaEvidence = {
     host: {
       audio: await inboundPackets(host, "audio"),
@@ -403,7 +585,7 @@ test("two-person audio/video, mute, leave, removal, and end for all", async ({
   await expect(guest).toHaveURL(new URL("/", invite).href);
   await guest
     .getByRole("region", { name: "Meeting actions" })
-    .getByRole("button", { name: "Join", exact: true })
+    .getByRole("link", { name: "Join", exact: true })
     .click();
   await guest.getByLabel("Meeting ID or invitation link").fill(code!);
   await guest.getByLabel("Your name", { exact: true }).fill("Jordan Lee");

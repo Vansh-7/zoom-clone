@@ -67,6 +67,26 @@ export function localSchedule(date: string, time: string): string {
     throw new ApiError("INVALID_DATE", "Choose a meeting time in the future.");
   return value.toISOString();
 }
+export function friendlyTimezone(
+  timezone: string,
+  date: string,
+  time: string,
+): string {
+  if (!timezone) return "Detecting timezone…";
+  const scheduled = new Date(`${date}T${time}:00`);
+  const at = Number.isFinite(scheduled.getTime()) ? scheduled : new Date();
+  const offset =
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      timeZoneName: "longOffset",
+    })
+      .formatToParts(at)
+      .find((part) => part.type === "timeZoneName")?.value ?? "GMT";
+  const region = ["Asia/Calcutta", "Asia/Kolkata"].includes(timezone)
+    ? "India"
+    : timezone.split("/").pop()!.replaceAll("_", " ");
+  return `(${offset === "GMT" ? "GMT+00:00" : offset}) ${region}`;
+}
 export async function copyText(text: string): Promise<void> {
   if (!navigator.clipboard)
     throw new Error(

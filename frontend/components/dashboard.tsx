@@ -4,23 +4,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
-  ArrowLeft,
-  ArrowRight,
   CalendarDays,
   Check,
-  ChevronDown,
   ChevronRight,
-  CircleHelp,
   Clock3,
   Copy,
-  Home,
-  Info,
-  Link2,
-  MoreHorizontal,
   Plus,
-  Search,
-  Settings,
-  Users,
   Video,
 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -32,8 +21,10 @@ import {
   saveHostToken,
 } from "@/lib/meetings";
 import type { Meeting, User } from "@/types";
-import { JoinDialog, MeetingDetails, ScheduleDialog } from "./meeting-dialogs";
-import { ErrorNotice, Modal, Spinner, useToast } from "./ui";
+import { MeetingDetails } from "./meeting-dialogs";
+import { WorkspaceShell } from "./workspace-shell";
+import { MeetingsManager } from "./meetings-manager";
+import { ErrorNotice, Spinner, useToast } from "./ui";
 
 function Clock() {
   const [now, setNow] = useState<Date | null>(null);
@@ -45,14 +36,15 @@ function Clock() {
   }, []);
   return (
     <div className="home-clock">
-      <h1 suppressHydrationWarning>
+      <div className="clock-time" suppressHydrationWarning>
         {now
           ? now.toLocaleTimeString(undefined, {
               hour: "numeric",
               minute: "2-digit",
+              hour12: true,
             })
           : "—:—"}
-      </h1>
+      </div>
       <p>
         {now?.toLocaleDateString(undefined, {
           weekday: "long",
@@ -73,15 +65,10 @@ export function Dashboard({ view }: { view: "home" | "meetings" }) {
   const [loading, setLoading] = useState(true);
   const [timezone, setTimezone] = useState("");
   const [error, setError] = useState("");
-  const [dialog, setDialog] = useState<
-    "join" | "schedule" | "profile" | "settings" | "help" | null
-  >(null);
   const [selected, setSelected] = useState<Meeting | null>(null);
-  const [scheduled, setScheduled] = useState(false);
   const [creating, setCreating] = useState(false);
   const [starting, setStarting] = useState("");
   const [query, setQuery] = useState("");
-  const [tab, setTab] = useState<"upcoming" | "recent">("upcoming");
 
   const load = useCallback(async () => {
     try {
@@ -190,7 +177,6 @@ export function Dashboard({ view }: { view: "home" | "meetings" }) {
             className="meeting-title"
             onClick={() => {
               setSelected(meeting);
-              setScheduled(false);
             }}
           >
             {meeting.title}
@@ -240,11 +226,11 @@ export function Dashboard({ view }: { view: "home" | "meetings" }) {
             >
               {starting === meeting.meeting_code ? <Spinner size={14} /> : null}
               {meeting.can_claim
-                ? "Start demo"
+                ? "Start Meeting"
                 : owns
                   ? meeting.status === "in_progress"
                     ? "Rejoin"
-                    : "Start"
+                    : "Start Meeting"
                   : "Join"}
             </button>
           )}
@@ -276,414 +262,177 @@ export function Dashboard({ view }: { view: "home" | "meetings" }) {
               : "Your completed meetings will appear here."}
         </p>
         {!query && label === "upcoming" && (
-          <button className="text-button" onClick={() => setDialog("schedule")}>
+          <Link className="text-button" href="/schedule">
             Schedule a meeting <ChevronRight size={15} />
-          </button>
+          </Link>
         )}
       </div>
     );
   }
 
-  return (
-    <div className="workspace">
-      <header className="app-header">
-        <Link className="wordmark" href="/" aria-label="Zoom Workplace Home">
-          zoom<span>Workplace</span>
-        </Link>
-        <div className="header-history">
-          <button
-            className="icon-button"
-            aria-label="Go back"
-            onClick={() => window.history.back()}
-          >
-            <ArrowLeft size={16} />
-          </button>
-          <button
-            className="icon-button"
-            aria-label="Go forward"
-            onClick={() => window.history.forward()}
-          >
-            <ArrowRight size={16} />
-          </button>
-        </div>
-        <div className="header-search">
-          <Search size={17} />
-          <input
-            aria-label="Search meetings"
-            placeholder="Search meetings"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+  if (view === "meetings")
+    return (
+      <WorkspaceShell
+        active="meetings"
+        user={user}
+        loading={loading}
+        offline={!!error}
+        query={query}
+        onQueryChange={setQuery}
+      >
+        <main className="meetings-main">
+          <h1 className="sr-only">Meetings</h1>
+          {error && <ErrorNotice message={error} onRetry={() => void load()} />}
+          <MeetingsManager
+            upcoming={upcoming}
+            recent={recent}
+            user={user}
+            query={query}
+            loading={loading}
+            timezone={timezone}
+            starting={starting}
+            onStart={start}
+            onCopy={copy}
+            onRefresh={load}
           />
-          <span className="search-hint">Meetings</span>
-        </div>
-        <div className="header-right">
-          <span
-            className={`connection-label ${error ? "connection-offline" : loading ? "connection-pending" : ""}`}
-          >
-            <span />
-            {error ? "Offline" : loading ? "Connecting" : "Available"}
-          </span>
-          <button
-            className="icon-button header-settings"
-            aria-label="Settings"
-            onClick={() => setDialog("settings")}
-          >
-            <Settings size={19} />
-          </button>
-          <button
-            className="profile-avatar"
-            aria-label="Open profile"
-            onClick={() => setDialog("profile")}
-          >
-            AM
-            <span />
-          </button>
-        </div>
-      </header>
-      <aside className="sidebar" aria-label="Main navigation">
-        <nav>
-          <Link
-            href="/"
-            className={`nav-item ${view === "home" ? "nav-active" : ""}`}
-            aria-current={view === "home" ? "page" : undefined}
-          >
-            <Home size={22} strokeWidth={1.8} />
-            <span>Home</span>
-          </Link>
-          <Link
-            href="/meetings"
-            className={`nav-item ${view === "meetings" ? "nav-active" : ""}`}
-            aria-current={view === "meetings" ? "page" : undefined}
-          >
-            <Video size={22} strokeWidth={1.8} />
-            <span>Meetings</span>
-          </Link>
-          <button
-            className="nav-item nav-disabled"
-            disabled
-            title="Contacts aren't included in this demo"
-          >
-            <Users size={22} strokeWidth={1.8} />
-            <span>Contacts</span>
-          </button>
-          <button
-            className="nav-item nav-disabled"
-            disabled
-            title="Additional Zoom products aren't included"
-          >
-            <MoreHorizontal size={23} />
-            <span>More</span>
-          </button>
-        </nav>
-        <div className="sidebar-bottom">
-          <button
-            className="nav-item"
-            onClick={() => setDialog("help")}
-            aria-label="Help"
-          >
-            <CircleHelp size={21} />
-            <span>Help</span>
-          </button>
-          <button
-            className="nav-item"
-            onClick={() => setDialog("settings")}
-            aria-label="Workspace settings"
-          >
-            <Settings size={21} />
-            <span>Settings</span>
-          </button>
-        </div>
-      </aside>
+        </main>
+        {selected && (
+          <MeetingDetails
+            meeting={selected}
+            onClose={() => setSelected(null)}
+          />
+        )}
+      </WorkspaceShell>
+    );
+
+  return (
+    <WorkspaceShell
+      active={view}
+      user={user}
+      loading={loading}
+      offline={!!error}
+      query={query}
+      onQueryChange={setQuery}
+    >
       <main className="dashboard-main">
         <div className="dashboard-inner">
-          <div className="page-heading">
-            <div>
-              <h2>{view === "home" ? "Home" : "Meetings"}</h2>
-            </div>
-            <span className="workspace-chip">
-              <span />
-              {user?.name ?? "Your workspace"}
-            </span>
-          </div>
-          {view === "home" ? (
-            <section className="home-hero" aria-label="Meeting actions">
-              <Clock />
-              <div className="quick-actions">
-                <button
-                  onClick={() => void instant()}
-                  disabled={creating}
-                  className="quick-action"
-                >
-                  <span className="action-square action-orange">
-                    {creating ? (
-                      <Spinner size={29} />
-                    ) : (
-                      <Video size={30} strokeWidth={1.8} />
-                    )}
-                  </span>
-                  <span>
-                    New Meeting <ChevronDown size={12} />
-                  </span>
-                </button>
-                <button
-                  onClick={() => setDialog("join")}
-                  className="quick-action"
-                >
-                  <span className="action-square">
-                    <Plus size={30} strokeWidth={2} />
-                  </span>
-                  <span>Join</span>
-                </button>
-                <button
-                  onClick={() => setDialog("schedule")}
-                  className="quick-action"
-                >
-                  <span className="action-square">
-                    <CalendarDays size={28} strokeWidth={1.8} />
-                  </span>
-                  <span>Schedule</span>
-                </button>
-              </div>
-              <p className="hero-caption">
-                <span
-                  className={`subtle-status ${error ? "status-offline" : loading ? "status-pending" : ""}`}
-                />
-                {error
-                  ? "Waiting for the meeting server."
-                  : loading
-                    ? "Connecting to your workspace…"
-                    : "Ready when you are."}
-              </p>
-            </section>
-          ) : (
-            <div className="meetings-toolbar">
-              <div className="tabs">
-                <button
-                  className={tab === "upcoming" ? "tab-active" : ""}
-                  onClick={() => setTab("upcoming")}
-                >
-                  Upcoming <span>{upcoming.length}</span>
-                </button>
-                <button
-                  className={tab === "recent" ? "tab-active" : ""}
-                  onClick={() => setTab("recent")}
-                >
-                  Previous <span>{recent.length}</span>
-                </button>
-              </div>
+          <h1 className="sr-only">{view === "home" ? "Home" : "Meetings"}</h1>
+          <section className="home-hero" aria-label="Meeting actions">
+            <Clock />
+            <div className="quick-actions">
               <button
-                className="button primary"
-                onClick={() => setDialog("schedule")}
+                onClick={() => void instant()}
+                disabled={creating}
+                className="quick-action"
               >
-                <Plus size={17} />
-                Schedule Meeting
-              </button>
-            </div>
-          )}
-          {error && <ErrorNotice message={error} onRetry={() => void load()} />}
-          <div
-            className={`meeting-panels ${view === "meetings" ? "panels-full" : ""}`}
-          >
-            {(view === "home" || tab === "upcoming") && (
-              <section className="meeting-panel">
-                <div className="panel-heading">
-                  <h2>
-                    Upcoming meetings{" "}
-                    <span className="count-badge">{upcoming.length}</span>
-                  </h2>
-                  {view === "home" ? (
-                    <Link href="/meetings">
-                      View all <ChevronRight size={14} />
-                    </Link>
+                <span className="action-square action-orange">
+                  {creating ? (
+                    <Spinner size={29} />
                   ) : (
-                    <button className="text-button" onClick={() => void load()}>
-                      <Clock3 size={15} />
-                      Refresh
-                    </button>
+                    <Video size={30} strokeWidth={1.8} />
                   )}
+                </span>
+                <span>New Meeting</span>
+              </button>
+              <Link href="/join" className="quick-action">
+                <span className="action-square">
+                  <Plus size={30} strokeWidth={2} />
+                </span>
+                <span>Join</span>
+              </Link>
+              <Link href="/schedule" className="quick-action">
+                <span className="action-square">
+                  <CalendarDays size={28} strokeWidth={1.8} />
+                </span>
+                <span>Schedule</span>
+              </Link>
+            </div>
+            <p className="hero-caption">
+              <span
+                className={`subtle-status ${error ? "status-offline" : loading ? "status-pending" : ""}`}
+              />
+              {error
+                ? "Waiting for the meeting server."
+                : loading
+                  ? "Connecting to your workspace…"
+                  : "Ready when you are."}
+            </p>
+          </section>
+          {error && <ErrorNotice message={error} onRetry={() => void load()} />}
+          <div className="meeting-panels">
+            <section className="meeting-panel">
+              <div className="panel-heading">
+                <h2>
+                  Upcoming meetings{" "}
+                  <span className="count-badge">{upcoming.length}</span>
+                </h2>
+                <Link href="/meetings">
+                  View all <ChevronRight size={14} />
+                </Link>
+              </div>
+              {loading ? (
+                <div className="skeleton-list">
+                  {[1, 2, 3].map((n) => (
+                    <div className="skeleton-row" key={n}>
+                      <div />
+                      <span />
+                      <span />
+                    </div>
+                  ))}
                 </div>
-                {loading ? (
-                  <div className="skeleton-list">
-                    {[1, 2, 3].map((n) => (
-                      <div className="skeleton-row" key={n}>
-                        <div />
-                        <span />
-                        <span />
-                      </div>
-                    ))}
-                  </div>
-                ) : next.length ? (
-                  <div
-                    className={
-                      view === "home" ? "home-meeting-list" : undefined
-                    }
-                  >
-                    {next.map((meeting) => meetingRow(meeting))}
-                  </div>
-                ) : (
-                  empty("upcoming")
-                )}
-                <div className="panel-footer">
-                  <CalendarDays size={14} />
-                  <span>
-                    {timezone && (
-                      <>
-                        {timezone.replaceAll("_", " ")}{" "}
-                        <span className="footer-dot">·</span>{" "}
-                      </>
-                    )}
-                    Your local time
-                  </span>
+              ) : next.length ? (
+                <div className="home-meeting-list">
+                  {next.map((meeting) => meetingRow(meeting))}
                 </div>
-              </section>
-            )}
-            {(view === "home" || tab === "recent") && (
-              <section className="meeting-panel">
-                <div className="panel-heading">
-                  <h2>Recent meetings</h2>
-                  <Clock3 size={17} className="muted" />
+              ) : (
+                empty("upcoming")
+              )}
+              <div className="panel-footer">
+                <CalendarDays size={14} />
+                <span>
+                  {timezone && (
+                    <>
+                      {timezone.replaceAll("_", " ")}{" "}
+                      <span className="footer-dot">·</span>{" "}
+                    </>
+                  )}
+                  Your local time
+                </span>
+              </div>
+            </section>
+            <section className="meeting-panel">
+              <div className="panel-heading">
+                <h2>Recent meetings</h2>
+                <Clock3 size={17} className="muted" />
+              </div>
+              {loading ? (
+                <div className="skeleton-list">
+                  {[1, 2, 3].map((n) => (
+                    <div className="skeleton-row" key={n}>
+                      <div />
+                      <span />
+                      <span />
+                    </div>
+                  ))}
                 </div>
-                {loading ? (
-                  <div className="skeleton-list">
-                    {[1, 2, 3].map((n) => (
-                      <div className="skeleton-row" key={n}>
-                        <div />
-                        <span />
-                        <span />
-                      </div>
-                    ))}
-                  </div>
-                ) : past.length ? (
-                  <div
-                    className={
-                      view === "home" ? "home-meeting-list" : undefined
-                    }
-                  >
-                    {past.map((meeting) => meetingRow(meeting, true))}
-                  </div>
-                ) : (
-                  empty("recent")
-                )}
-                <div className="panel-footer">
-                  <Check size={14} />
-                  <span>Your meeting history, all in one place</span>
+              ) : past.length ? (
+                <div className="home-meeting-list">
+                  {past.map((meeting) => meetingRow(meeting, true))}
                 </div>
-              </section>
-            )}
+              ) : (
+                empty("recent")
+              )}
+              <div className="panel-footer">
+                <Check size={14} />
+                <span>Your meeting history, all in one place</span>
+              </div>
+            </section>
           </div>
-          <footer className="workspace-footer">
-            <span>
-              <Video size={14} />
-              Connect. Collaborate. Get things done.
-            </span>
-            <button onClick={() => setDialog("help")}>
-              Need a hand? <CircleHelp size={14} />
-            </button>
-          </footer>
         </div>
       </main>
-      {dialog === "join" && <JoinDialog onClose={() => setDialog(null)} />}
-      {dialog === "schedule" && (
-        <ScheduleDialog
-          onClose={() => setDialog(null)}
-          onScheduled={(meeting) => {
-            setDialog(null);
-            setSelected(meeting);
-            setScheduled(true);
-            notify("Meeting scheduled successfully");
-            void load();
-          }}
-        />
-      )}
       {selected && (
-        <MeetingDetails
-          meeting={selected}
-          scheduled={scheduled}
-          onClose={() => {
-            setSelected(null);
-            setScheduled(false);
-          }}
-        />
+        <MeetingDetails meeting={selected} onClose={() => setSelected(null)} />
       )}
-      {dialog === "profile" && (
-        <Modal title="Your profile" onClose={() => setDialog(null)}>
-          <div className="placeholder-content">
-            <div className="large-avatar">AM</div>
-            <h3>{user?.name ?? "Alex Morgan"}</h3>
-            <p>{user?.email ?? "alex.morgan@example.com"}</p>
-            <div className="schedule-info">
-              <Info size={18} />
-              <span>
-                This workspace uses a default organizer. Account editing and
-                login aren’t required for this assignment.
-              </span>
-            </div>
-          </div>
-        </Modal>
-      )}
-      {dialog === "settings" && (
-        <Modal
-          title="Settings"
-          subtitle="Workspace preferences"
-          onClose={() => setDialog(null)}
-        >
-          <div className="placeholder-content settings-content">
-            <div>
-              <GlobeSetting />
-              <span>
-                Time zone
-                <strong>
-                  {Intl.DateTimeFormat().resolvedOptions().timeZone}
-                </strong>
-              </span>
-            </div>
-            <div>
-              <Video size={20} />
-              <span>
-                Audio & video
-                <strong>Check your devices before joining a meeting.</strong>
-              </span>
-            </div>
-            <p>
-              Profile editing and additional preferences are placeholders. Your
-              browser manages camera and microphone permissions.
-            </p>
-          </div>
-        </Modal>
-      )}
-      {dialog === "help" && (
-        <Modal
-          title="A little help getting started"
-          onClose={() => setDialog(null)}
-        >
-          <div className="help-content">
-            <p>
-              <strong>New Meeting</strong> creates an instant room. Continue
-              through the preview to connect audio and video.
-            </p>
-            <p>
-              <strong>Join</strong> accepts an 11-digit ID or an invitation from
-              this app. Enter your name before joining.
-            </p>
-            <p>
-              <strong>Schedule</strong> saves a future meeting in your device’s
-              timezone. Only the creating browser can start it.
-            </p>
-            <p>
-              <strong>Start demo</strong> claims a sample meeting for this
-              browser. Each demo can be claimed once.
-            </p>
-            <p className="form-note">
-              <Link2 size={17} />
-              Use Copy Invitation to invite someone in a different browser.
-            </p>
-          </div>
-        </Modal>
-      )}
-    </div>
+    </WorkspaceShell>
   );
-}
-
-function GlobeSetting() {
-  return <CalendarDays size={20} />;
 }
