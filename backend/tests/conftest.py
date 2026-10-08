@@ -13,10 +13,13 @@ from fastapi.testclient import TestClient
 
 from app.database import Base, engine
 from app.main import app
+from app.websocket.limits import ConnectionGate
+from app.websocket.manager import manager
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     Base.metadata.drop_all(engine)
+    monkeypatch.setattr(manager, "gate", ConnectionGate())
     with TestClient(app) as test_client:
         yield test_client

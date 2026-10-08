@@ -14,7 +14,14 @@ from starlette.concurrency import run_in_threadpool
 from app.config import get_settings
 from app.database import SessionLocal, utcnow
 from app.models import Meeting, MeetingParticipant
-from app.services.meetings import AppError, end_meeting, get_meeting, get_participant
+from app.services.meetings import AppError, end_meeting, get_meeting, token_hash
+from app.websocket.limits import (
+    AUTH_TIMEOUT_SECONDS,
+    MAX_INVALID_MESSAGES,
+    MAX_MESSAGE_BYTES,
+    ConnectionGate,
+    TokenBucket,
+)
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -29,6 +36,8 @@ class Connection:
     video_enabled: bool = False
     screen_sharing: bool = False
     last_chat_at: float = 0
+    messages: TokenBucket = field(default_factory=lambda: TokenBucket(160, 40))
+    controls: TokenBucket = field(default_factory=lambda: TokenBucket(20, 5))
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def public(self):
@@ -49,15 +58,50 @@ class Connection:
                 pass
 
 
-def authenticate(code: str, token: str):
+def authenticate(code: str, digest: str):
     with SessionLocal() as db:
-        meeting = get_meeting(db, code)
-        participant = get_participant(db, meeting, token)
-        return {
-            "id": participant.id,
-            "display_name": participant.display_name,
-            "role": participant.role,
-        }
+        # One fresh joined SELECT; never cache membership or authorization.
+        participant = (
+            db.execute(
+                select(
+                    MeetingParticipant.id,
+                    MeetingParticipant.display_name,
+                    MeetingParticipant.role,
+                )
+                .join(Meeting, Meeting.id == MeetingParticipant.meeting_id)
+                .where(
+                    Meeting.meeting_code == code,
+                    Meeting.status == "in_progress",
+                    MeetingParticipant.token_hash == digest,
+                    MeetingParticipant.left_at.is_(None),
+                    MeetingParticipant.removed_at.is_(None),
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if participant is None:
+            raise AppError(
+                401,
+                "INVALID_SESSION",
+                "Your meeting session has ended. Please join again.",
+            )
+        return dict(participant)
+
+
+async def receive_text(socket: WebSocket, limit: int = MAX_MESSAGE_BYTES) -> str:
+    event = await socket.receive()
+    if event["type"] == "websocket.disconnect":
+        raise WebSocketDisconnect(event.get("code", 1000))
+    raw = event.get("text")
+    if raw is None:
+        await socket.close(code=1003)
+        raise WebSocketDisconnect(1003)
+    # Defense for direct ASGI clients; app.server enforces this before ASGI delivery.
+    if len(raw.encode("utf-8")) > limit:
+        await socket.close(code=1009)
+        raise WebSocketDisconnect(1009)
+    return raw
 
 
 def depart(participant_id: int):
@@ -93,6 +137,7 @@ class RoomManager:
     def __init__(self):
         self.rooms: dict[str, dict[int, Connection]] = {}
         self.host_timers: dict[str, asyncio.Task] = {}
+        self.gate = ConnectionGate()
 
     async def broadcast(self, code: str, message: dict, exclude: int | None = None):
         connections = list(self.rooms.get(code, {}).values())
@@ -149,19 +194,36 @@ class RoomManager:
         ):
             await socket.close(code=4403)
             return
-        await socket.accept()
+        if len(code) != 11 or not code.isascii() or not code.isdigit():
+            await socket.close(code=4403)
+            return
+        ip = socket.client.host if socket.client else "unknown"
+        gate = self.gate
+        if not gate.acquire(ip):
+            await socket.close(code=1013)
+            return
         connection = None
+        pending = True
+        host_session = False
         try:
-            auth = await asyncio.wait_for(socket.receive_json(), timeout=5)
+            await socket.accept()
+            auth = json.loads(
+                await asyncio.wait_for(
+                    receive_text(socket, 1024), timeout=AUTH_TIMEOUT_SECONDS
+                )
+            )
             if (
                 not isinstance(auth, dict)
                 or auth.get("type") != "auth"
                 or not isinstance(auth.get("token"), str)
+                or not 1 <= len(auth["token"]) <= 128
+                or not auth["token"].isascii()
             ):
                 raise AppError(
                     401, "INVALID_SESSION", "A valid participant session is required."
                 )
-            participant = await run_in_threadpool(authenticate, code, auth["token"])
+            digest = token_hash(auth["token"])
+            participant = await run_in_threadpool(authenticate, code, digest)
             room = self.rooms.setdefault(code, {})
             if participant["id"] in room:
                 raise AppError(
@@ -169,6 +231,9 @@ class RoomManager:
                 )
             connection = Connection(socket=socket, **participant)
             room[connection.id] = connection
+            gate.authenticated(ip)
+            pending = False
+            host_session = connection.role == "host"
             if connection.role == "host":
                 timer = self.host_timers.pop(code, None)
                 if timer:
@@ -185,28 +250,55 @@ class RoomManager:
                 {"type": "participant-joined", "participant": connection.public()},
                 connection.id,
             )
+            invalid_messages = 0
             while True:
-                raw = await socket.receive_text()
-                if len(raw) > 65536:
-                    await socket.close(code=1009)
+                raw = await receive_text(socket)
+                if not connection.messages.take():
+                    await connection.send(
+                        {
+                            "type": "error",
+                            "code": "WS_RATE_LIMIT",
+                            "message": "Too many signaling messages. Please rejoin.",
+                        }
+                    )
+                    await socket.close(code=1008)
                     break
                 try:
                     message = json.loads(raw)
                     if not isinstance(message, dict):
                         raise ValueError("Message must be an object")
                     kind = message.get("type")
+                    if kind != "candidate" and not connection.controls.take():
+                        raise AppError(
+                            429,
+                            "WS_RATE_LIMIT",
+                            "Too many meeting commands. Please rejoin.",
+                        )
+                    if kind not in (
+                        "ping",
+                        "offer",
+                        "answer",
+                        "candidate",
+                        "restart-ice",
+                        "media-state",
+                        "chat",
+                        "mute-all",
+                        "remove-participant",
+                    ):
+                        raise ValueError("Unknown message type")
+                    participant = await run_in_threadpool(authenticate, code, digest)
+                    connection.role = participant["role"]
+                    connection.display_name = participant["display_name"]
                     if kind == "ping":
                         await connection.send({"type": "pong"})
                         continue
-                    # Revalidate persisted membership before every meaningful command.
-                    await run_in_threadpool(authenticate, code, auth["token"])
                     if kind in ("offer", "answer", "candidate", "restart-ice"):
                         target_id, payload = (
                             message.get("target"),
                             message.get("payload"),
                         )
                         if (
-                            not isinstance(target_id, int)
+                            type(target_id) is not int
                             or target_id == connection.id
                             or (kind != "restart-ice" and not isinstance(payload, dict))
                         ):
@@ -222,7 +314,8 @@ class RoomManager:
                             raise ValueError("Invalid ICE candidate")
                         target = self.rooms.get(code, {}).get(target_id)
                         if target:
-                            logger.info(
+                            log = logger.debug if kind == "candidate" else logger.info
+                            log(
                                 "rtc_signal type=%s meeting=%s sender=%s target=%s",
                                 kind,
                                 code,
@@ -307,7 +400,7 @@ class RoomManager:
                             )
                         else:
                             target_id = message.get("target")
-                            if not isinstance(target_id, int):
+                            if type(target_id) is not int:
                                 raise ValueError("Choose a participant to remove")
                             await run_in_threadpool(remove_participant, code, target_id)
                             target = self.rooms.get(code, {}).get(target_id)
@@ -320,7 +413,7 @@ class RoomManager:
                                 await target.socket.close(code=4403)
                     else:
                         raise ValueError("Unknown message type")
-                except (ValueError, AppError) as exc:
+                except (ValueError, RecursionError, AppError) as exc:
                     logger.warning(
                         "rtc_signal_rejected meeting=%s participant=%s code=%s",
                         code,
@@ -334,20 +427,41 @@ class RoomManager:
                             "message": getattr(exc, "message", str(exc)),
                         }
                     )
+                    if getattr(exc, "status", None) == 401:
+                        await socket.close(code=4401)
+                        break
+                    if getattr(exc, "code", None) == "WS_RATE_LIMIT":
+                        await socket.close(code=1008)
+                        break
+                    if (
+                        isinstance(exc, (ValueError, RecursionError))
+                        or getattr(exc, "code", None) == "HOST_REQUIRED"
+                    ):
+                        invalid_messages += 1
+                        if invalid_messages >= MAX_INVALID_MESSAGES:
+                            await socket.close(code=1008)
+                            break
         except AppError as exc:
             await socket.send_json(
                 {"type": "error", "code": exc.code, "message": exc.message}
             )
             await socket.close(code=4401)
+        except asyncio.TimeoutError:
+            await socket.close(code=1008)
         except (
             WebSocketDisconnect,
-            asyncio.TimeoutError,
             ValueError,
+            RecursionError,
             RuntimeError,
             OSError,
         ):
-            pass
+            if connection is None:
+                try:
+                    await socket.close(code=1008)
+                except (RuntimeError, OSError):
+                    pass
         finally:
+            gate.release(ip, pending)
             if connection:
                 # Finish persistence and roster cleanup even when the ASGI task is cancelled.
                 with anyio.CancelScope(shield=True):
@@ -360,7 +474,7 @@ class RoomManager:
                         )
                     if not room:
                         self.rooms.pop(code, None)
-                    if connection.role == "host":
+                    if host_session:
                         previous = self.host_timers.pop(code, None)
                         if previous:
                             previous.cancel()
