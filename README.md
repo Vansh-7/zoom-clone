@@ -10,10 +10,11 @@ This is an original educational implementation, not an official Zoom product. Vi
 
 ## Features
 
-- Responsive Home and Meetings views, upcoming/recent records, search, empty states, retry states, and a live clock.
+- Zoom Workplace-inspired shared navigation, a compact Home clock/actions area, and SQLite-backed upcoming/recent cards.
+- Split-view Meetings manager with date grouping, selection, Upcoming/Previous tabs, invitation details, and mobile list-to-detail navigation.
 - Instant meeting creation with a unique 11-digit ID and shareable invitation.
-- Join by formatted ID or application invitation URL, including direct-link prejoin with a required display name.
-- Scheduling with title, description, local date/time, timezone, duration, persisted records, and invitation copying.
+- Dedicated `/join` page accepting formatted IDs or application invitation URLs, including direct-link prejoin with a required display name.
+- Dedicated `/schedule` form with title, description, local date/time, friendly GMT offset plus IANA timezone, duration, persisted records, and invitation copying.
 - Real two-person camera/audio conferencing, media preview, microphone/camera toggles, roster, invitations, and leave/end actions.
 - Server-authorized host mute-all, participant removal, and end-for-everyone.
 - Clear media permission errors, joining without media, host-first scheduled admission, and explicit rejoining after disconnection.
@@ -27,11 +28,17 @@ Profile, settings, and contacts are labeled placeholders. Login, recording, and 
 
 Captured from the actual local production build with SQLite-backed sample records. The room screenshot shows two admitted participants with cameras off; separate media tests verify real RTP and decoded frames.
 
+These screenshots show the locally verified frontend refinement. The public deployment links above may still show the preceding release until these changes are published and deployed.
+
 ![Dashboard](docs/screenshots/dashboard.png)
+
+![Split-view Meetings manager](docs/screenshots/meetings.png)
 
 ![Two-participant meeting room and host controls](docs/screenshots/meeting-room.png)
 
-![Scheduling dialog](docs/screenshots/scheduling.png)
+![Schedule Meeting page](docs/screenshots/scheduling.png)
+
+![Join Meeting page](docs/screenshots/join.png)
 
 <img src="docs/screenshots/mobile.png" alt="Mobile dashboard" width="390" />
 
@@ -42,7 +49,7 @@ Next.js App Router, React, strict TypeScript, Tailwind CSS 4, Lucide React; Pyth
 ```text
 frontend/
   app/                 Routes, global styles, error pages
-  components/          Dashboard, dialogs, meeting room, shared UI
+  components/          Workspace shell, meeting manager/forms, room, shared UI
   hooks/               Local media and WebRTC/signaling
   lib/                 Typed API client, invitations, date helpers
   types/               API contracts
@@ -272,9 +279,23 @@ The automated failure/retry test substitutes unreachable media candidates while 
 
 ## Verification
 
+The frontend refinement was verified locally on **9 October 2026 (India time)**:
+
+| Check | Result |
+| --- | --- |
+| Backend pytest | **63 passed**; existing API, database, authorization, and signaling behavior preserved |
+| Frontend lint, TypeScript, formatting, production build | Passed |
+| Playwright against the local production build | **13 passed**, including mandatory workflows, host/sample claiming, keyboard navigation, two-way synthetic audio/video, ICE retry, UDP/TCP relay media, screen sharing, chat, and host controls |
+| Scheduling timezone | Browser timezone and daylight-saving offset verified in a separate New York context; UTC persistence and host access checked |
+| SQLite persistence | A scheduled record's ID, title, description, UTC timestamp, timezone, duration, and status survived an actual local backend restart |
+| Visual comparison | Home, Meetings, Schedule, Join, and meeting room captured at **1440, 768, and 390 px** and compared with the supplied Zoom screenshots; mobile detail, chat, participants, and centered branding also inspected |
+| Responsive interactions | No horizontal overflow; mobile list-to-detail/back navigation, tabs, form controls, and room toolbar bounds passed |
+
+The backend and WebRTC hooks were not changed by this UI refinement. Temporary relay credentials and test services are local only. Physical camera/microphone quality, physical mobile keyboard behavior, cross-device/network conferencing, hosted TURN/TLS, and this refinement's production deployment have **not** been verified. Unsupported Zoom product/upgrade/calendar controls are intentionally omitted; branding and initials use original code rather than proprietary assets.
+
 The targeted WebSocket reliability update was verified locally on **9 October 2026 (India time)**: **63 backend tests passed**, Ruff checks passed, frontend lint/typecheck/format/production build passed, and **all 11 browser tests passed**, including authenticated local UDP/TCP TURN transport, ICE restart, host controls, screen sharing, chat, and mandatory workflows. Real Uvicorn socket tests confirmed oversized text/binary/fragmented messages never reached ASGI, while a near-limit valid offer was forwarded. SQL instrumentation confirmed one joined SELECT per authentication/command and current-role host checks. The Docker image built successfully, returned healthy SQLite status, and rejected an oversized WebSocket message with code 1009. Temporary test servers, containers, and relay credentials were removed. These changes have not yet been deployed; the following cloud results describe the preceding application release.
 
-Latest improvements were verified locally on **9 October 2026 (India time)**:
+The preceding application release was verified locally on **9 October 2026 (India time)**:
 
 | Check                                              | Result                                                                                                                                                                                      |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
