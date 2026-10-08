@@ -81,7 +81,7 @@ cd backend
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 Copy-Item .env.example .env
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m app.server --host 127.0.0.1 --port 8000
 ```
 
 Frontend:
@@ -191,6 +191,27 @@ All path identifiers below are 11-digit meeting codes, not internal row IDs. Swa
 
 WebSocket events include `welcome`, `participant-joined`, `participant-left`, `media-state` (including `screen_sharing`), targeted `offer`/`answer`/`candidate`/`restart-ice`, `chat`, `mute-request`, `removed`, and `meeting-ended`. The server assigns sender identity and rejects cross-room targeting and guest host commands. Chat text is trimmed, limited to 2000 characters and two messages per second per participant. Each browser retains only its latest 100 received messages; joining later or refreshing does not retrieve history. Raw capabilities are excluded from URLs and public meeting responses.
 
+### WebSocket safeguards
+
+Use `python -m app.server` for local and deployed startup. Docker and CI use this entry point: one Uvicorn worker, the explicitly selected `websockets` transport, a **65,536-byte** message limit, an incoming queue of **16 messages**, and compression disabled. Oversized text, binary, and fragmented messages are rejected by the protocol before ASGI delivery/JSON parsing. Bare `uvicorn app.main:app` does not inherit these settings. If overriding the command manually, supply `--workers 1 --ws websockets --ws-max-size 65536 --ws-max-queue 16 --ws-per-message-deflate false`. See [Uvicorn's transport settings](https://www.uvicorn.org/settings/).
+
+Each authenticated command, including heartbeat, performs **one joined SELECT** checking the meeting, token hash, current role, and left/removed markers. Only the token digest is reused; positive authorization is never cached. REST leave/end and host removal close affected sockets immediately. Out-of-band database revocation is rejected on the next inbound command/heartbeat and closes the socket.
+
+Limits are simple in-process token buckets in `backend/app/websocket/limits.py` and `manager.py`:
+
+| Guard                                         | Default                                                                               |
+| --------------------------------------------- | ------------------------------------------------------------------------------------- |
+| All messages per connection                   | 160-message burst, replenished at 40/second; includes malformed input and ICE         |
+| Non-candidate commands                        | 20-command burst, replenished at 5/second; includes ping, SDP, chat and host commands |
+| Repeated malformed/unauthorized host commands | Close after 8 violations                                                              |
+| Open WebSockets / pending authentication      | 128 total / 32 pending, at most 8 pending per network peer                            |
+| Handshake attempts                            | Global burst 60, refill 10/second; per-peer burst 40, refill 2/second                 |
+| Authentication                                | 5-second receive deadline, text-only frame at most 1024 bytes, bounded token input    |
+
+Rate exhaustion sends `WS_RATE_LIMIT` and closes with 1008; transport oversize closes with 1009. A pre-upgrade rejection is an HTTP handshake rejection. Existing chat throttling remains two messages per second. Candidate logging uses debug level to avoid a log entry per candidate at production info level. A 120-candidate burst and normal ICE restart are regression-tested.
+
+These bounds apply to this single process. Peer addresses come from the ASGI connection; arbitrary `X-Forwarded-For` headers are not parsed by the manager. Railway may expose shared proxy addresses, so per-peer limits can group visitors; global bounds remain effective. This is application protection rather than network-level DDoS mitigation. The pinned Uvicorn release supports the selected transport but emits deprecation warnings for its legacy adapter; transport behavior must be retested when upgrading dependencies.
+
 ## Meeting behavior and decisions
 
 1. **Create:** cryptographic randomness generates an 11-digit code; a database unique constraint and bounded retries prevent collisions. The API persists before redirecting.
@@ -250,6 +271,8 @@ For testing a separate relay without modifying production, set `E2E_RTC_CONFIG_F
 The automated failure/retry test substitutes unreachable media candidates while keeping real signaling connected, then restores candidates and verifies RTP recovery. Separate UDP and TCP relay tests passed using a temporary authenticated local coturn fixture. Hosted TURN, TURN over TLS, and your physical laptops/networks remain unverified.
 
 ## Verification
+
+The targeted WebSocket reliability update was verified locally on **9 October 2026 (India time)**: **63 backend tests passed**, Ruff checks passed, frontend lint/typecheck/format/production build passed, and **all 11 browser tests passed**, including authenticated local UDP/TCP TURN transport, ICE restart, host controls, screen sharing, chat, and mandatory workflows. Real Uvicorn socket tests confirmed oversized text/binary/fragmented messages never reached ASGI, while a near-limit valid offer was forwarded. SQL instrumentation confirmed one joined SELECT per authentication/command and current-role host checks. The Docker image built successfully, returned healthy SQLite status, and rejected an oversized WebSocket message with code 1009. Temporary test servers, containers, and relay credentials were removed. These changes have not yet been deployed; the following cloud results describe the preceding application release.
 
 Latest improvements were verified locally on **9 October 2026 (India time)**:
 
