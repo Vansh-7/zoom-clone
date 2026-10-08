@@ -4,7 +4,7 @@
 
 A Zoom-inspired meeting application with a real Next.js frontend, FastAPI backend, SQLite persistence, and peer-to-peer WebRTC audio/video. No login is required: Alex Morgan is the default organizer. All meeting lists and workflows use the API and database.
 
-**Submission links:** [Live application](https://scaler-zoom-clone-vansh.vercel.app) · [Backend health](https://zoom-api-production.up.railway.app/api/health) · [API documentation](https://zoom-api-production.up.railway.app/docs) · [Public repository](https://github.com/Vansh-7/zoom-clone)
+**Submission links:** [Live application](https://zoom-clone-vansh.vercel.app) · [Backend health](https://zoom-clone-api.up.railway.app/api/health) · [API documentation](https://zoom-clone-api.up.railway.app/docs) · [Public repository](https://github.com/Vansh-7/zoom-clone)
 
 This is an original educational implementation, not an official Zoom product. Visual references: [Zoom home](https://assets.zoom.us/images/en-us/desktop/generic/home/home-screen.png) and [Zoom gallery view](https://developers.zoom.us/img/msdk-web-client-view-gallery.png).
 
@@ -255,7 +255,7 @@ The following steps also describe how to reproduce the deployment in your own ac
 
 ### 1. Create the Railway backend
 
-1. Open Railway, select your workspace, and create an **Empty Project** named `scaler-zoom-clone`.
+1. Open Railway, select your workspace, and create an **Empty Project** named `zoom-clone`.
 2. Add an **Empty Service** named `zoom-api`. Configure it before connecting GitHub so the first application startup uses persistent storage.
 3. In service **Settings**, set the following values. Leave custom build/start/pre-deploy commands empty: the Dockerfile supplies the startup command. Initialization runs at startup because Railway does not mount volumes during builds or pre-deploy commands.
 
