@@ -190,11 +190,11 @@ An instant meeting abandoned before its host joins can remain active until the h
 
 ## Verification
 
-The following checks were executed locally on 8 October 2026:
+The following checks were executed locally on 8–9 October 2026:
 
 | Check                                                    | Result                                                                                                           |
 | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Backend API, database, and signaling tests               | 24 passed on Windows and 24 passed in the Linux Docker image                                                     |
+| Backend API, database, and signaling tests               | 25 passed on Windows; backend CI also passed on Linux                                                           |
 | Browser acceptance tests against the production build    | 6 passed, including bidirectional synthetic audio/video, scheduling, host controls, and mobile permission denial |
 | TypeScript, ESLint, Prettier, Ruff, and production build | Passed                                                                                                           |
 | SQLite persistence                                       | Scheduled records survived backend and container restarts; six seed identities and timestamps remained unchanged |
@@ -208,14 +208,14 @@ Cloud verification completed on **9 October 2026 (India time)** against the link
 | HTTPS API health and Swagger                                    | Both return 200; health confirms SQLite                                                                                                      |
 | CORS                                                            | Exact frontend origin accepted; unrelated origin rejected                                                                                    |
 | Dashboard, instant creation, ID/direct-link joining, scheduling | Passed against the real deployed API and database                                                                                            |
-| Full browser acceptance suite                                   | **6 passed** after fixing a server/browser timezone hydration mismatch                                                                       |
-| Two-person WebRTC over production WSS signaling                 | Both contexts received real audio/video RTP: host audio 26/video 36 packets; guest audio 27/video 22 packets at the captured sample          |
+| Full browser acceptance suite                                   | **6 passed** on the renamed production domains, including timezone hydration and participant departure checks                               |
+| Two-person WebRTC over production WSS signaling                 | Both contexts received nonzero real audio/video RTP packets and decoded remote video frames using synthetic devices                         |
 | Host controls and meeting cleanup                               | Mute-all, unmute, remove, leave/rejoin, and end-for-all passed                                                                               |
 | Persistent Railway SQLite volume                                | Saved schedule `20264058542` retained its title, UTC time, duration, and other fields after restart; all six seed records remained identical |
 | Desktop/tablet/mobile                                           | 1440, 768, and 390 px layouts and dialogs passed overflow/interaction checks and were visually reviewed                                      |
-| CI with timezone and notification-placement regression coverage | [Passed](https://github.com/Vansh-7/zoom-clone/actions/runs/37825385419)                                                                     |
+| CI with hydration, notification, and departure regression coverage | [Passed](https://github.com/Vansh-7/zoom-clone/actions/runs/37828438158)                                                                     |
 
-The tested frontend application commit is `eba5aaf`; the backend container is built from `dae6a8a` (the subsequent changes only fix frontend hydration, notification placement, and their tests). Railway uses one replica/worker and a 500 MB volume mounted at `/data`. Container restart logs confirm graceful shutdown followed by a fresh application startup. Evidence is kept in local ignored browser reports and `artifacts/`.
+Application code at `5260023` was verified on both deployed services. Frontend API configuration, backend invitation URLs, and CORS use the new production domains linked above. The previous frontend address redirects to the new address while preserving invitation paths. Railway uses one replica/worker and a 500 MB volume mounted at `/data`; the saved schedule remained present after the latest redeploy. Container restart logs confirm graceful shutdown followed by a fresh application startup. Evidence is kept in local ignored browser reports and `artifacts/`.
 
 **Not verified:** physical camera/microphone quality, participants on different networks, TURN relay behavior, Safari/Firefox, or rooms larger than two. Synthetic media proves actual WebRTC transport/decoding between two browser contexts; it does not establish these separate outcomes.
 
