@@ -290,6 +290,66 @@ test("screen sharing replaces video, preserves audio, and restores camera", asyn
   }
 });
 
+test("meeting chat delivers plain text with names and works on mobile", async ({
+  browser,
+  request,
+}) => {
+  const room = await pair(browser, request, { ice_servers: [] });
+  try {
+    for (const page of [room.host, room.guest])
+      await page
+        .getByRole("button", { name: "Show chat", exact: true })
+        .click();
+    await room.host
+      .getByLabel("Message everyone", { exact: true })
+      .fill("Hello everyone! <b>Plain text</b>");
+    await room.host.getByRole("button", { name: "Send", exact: true }).click();
+    await expect(
+      room.guest.getByRole("log", { name: "Messages" }),
+    ).toContainText("Hello everyone! <b>Plain text</b>");
+    await expect(room.guest.locator(".chat-meta strong")).toHaveText(
+      "RTC host",
+    );
+    await expect(room.guest.locator(".chat-message b")).toHaveCount(0);
+    await room.guest
+      .getByLabel("Message everyone", { exact: true })
+      .fill("Sounds good!\nReady to present.");
+    await room.guest.getByRole("button", { name: "Send", exact: true }).click();
+    await expect(
+      room.host.getByRole("log", { name: "Messages" }),
+    ).toContainText("Ready to present.");
+    await expect(room.host.locator(".chat-message")).toHaveCount(2);
+    await room.host.screenshot({ path: "../artifacts/meeting-chat.png" });
+    await room.guest.setViewportSize({ width: 390, height: 844 });
+    expect(
+      await room.guest.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await room.guest
+      .getByRole("button", { name: "Close chat", exact: true })
+      .click();
+    await room.guest
+      .getByRole("button", { name: "Show participants", exact: true })
+      .click();
+    await expect(room.guest.locator(".participants-heading")).toContainText(
+      "Participants",
+    );
+    await room.guest
+      .getByRole("button", { name: "Show chat", exact: true })
+      .click();
+    await expect(room.guest.locator(".chat-panel")).toBeVisible();
+    await expect(
+      room.guest.getByRole("button", { name: "Close participants" }),
+    ).toHaveCount(0);
+    await expect
+      .poll(async () => (await packets(room.guest)).audio)
+      .toBeGreaterThan(0);
+  } finally {
+    await room.close();
+  }
+});
+
 test("ICE failure diagnostics and retry recover without leaving the room", async ({
   browser,
   request,

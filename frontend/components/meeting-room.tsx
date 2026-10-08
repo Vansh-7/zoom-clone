@@ -20,6 +20,7 @@ import {
   Mic,
   MicOff,
   MonitorUp,
+  MessageSquare,
   ShieldCheck,
   Signal,
   Users,
@@ -40,6 +41,7 @@ import { useConference } from "@/hooks/use-conference";
 import { useScreenShare } from "@/hooks/use-screen-share";
 import type { Admission, Meeting, Participant } from "@/types";
 import { MeetingDetails } from "./meeting-dialogs";
+import { MeetingChat } from "./meeting-chat";
 import { ErrorNotice, Modal, Spinner, useToast } from "./ui";
 
 function VideoTile({
@@ -128,6 +130,7 @@ export function MeetingRoom({ code }: { code: string }) {
   const [joining, setJoining] = useState(false);
   const [waiting, setWaiting] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<Participant | null>(null);
@@ -649,6 +652,15 @@ export function MeetingRoom({ code }: { code: string }) {
             )}
           </aside>
         )}
+        {chatOpen && (
+          <MeetingChat
+            messages={conference.chatMessages}
+            connected={conference.connection === "connected"}
+            selfId={self.id}
+            send={conference.sendChat}
+            onClose={() => setChatOpen(false)}
+          />
+        )}
       </div>
       <footer className="meeting-toolbar">
         <div className="toolbar-media">
@@ -691,7 +703,10 @@ export function MeetingRoom({ code }: { code: string }) {
           </button>
           <button
             className={`toolbar-control ${rosterOpen ? "toolbar-active" : ""}`}
-            onClick={() => setRosterOpen(!rosterOpen)}
+            onClick={() => {
+              setRosterOpen(!rosterOpen);
+              setChatOpen(false);
+            }}
             aria-label="Show participants"
           >
             <span className="toolbar-count-icon">
@@ -705,6 +720,17 @@ export function MeetingRoom({ code }: { code: string }) {
             <span>Invite</span>
           </button>
           <button
+            className={`toolbar-control ${chatOpen ? "toolbar-active" : ""}`}
+            onClick={() => {
+              setChatOpen(!chatOpen);
+              setRosterOpen(false);
+            }}
+            aria-label="Show chat"
+          >
+            <MessageSquare size={24} />
+            <span>Chat</span>
+          </button>
+          <button
             className="toolbar-control toolbar-info"
             onClick={() => setDetailsOpen(true)}
           >
@@ -716,6 +742,7 @@ export function MeetingRoom({ code }: { code: string }) {
               className="toolbar-control host-tools"
               onClick={() => {
                 setRosterOpen(true);
+                setChatOpen(false);
               }}
             >
               <ShieldCheck size={24} />

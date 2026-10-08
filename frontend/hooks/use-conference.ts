@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, websocketUrl } from "@/lib/api";
 import { errorMessage } from "@/lib/meetings";
 import { mediaFailure, rtcDiagnostics } from "@/lib/rtc-diagnostics";
-import type { Admission, Participant } from "@/types";
+import type { Admission, Participant, ChatMessage } from "@/types";
 
 interface Peer {
   pc: RTCPeerConnection;
@@ -28,6 +28,8 @@ interface SignalMessage {
   sender?: number;
   payload?: RTCSessionDescriptionInit & RTCIceCandidateInit;
   message?: string;
+  code?: string;
+  chat?: ChatMessage;
 }
 
 function candidateMatches(
@@ -72,6 +74,7 @@ export function useConference(
   const [connection, setConnection] = useState("connecting");
   const [terminal, setTerminal] = useState("");
   const [error, setError] = useState("");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
 
   useEffect(() => {
     muteRef.current = onMute;
@@ -378,6 +381,9 @@ export function useConference(
                     });
                   }
                 }
+              } else if (message.type === "chat" && message.chat) {
+                const chat = message.chat;
+                setChatMessages((current) => [...current, chat].slice(-100));
               } else if (message.type === "mute-request") {
                 muteRef.current();
                 notifyRef.current(
@@ -399,9 +405,18 @@ export function useConference(
               } else if (message.type === "notice")
                 notifyRef.current(message.message ?? "Done");
               else if (message.type === "error")
-                setError(
-                  message.message ?? "The meeting server reported an error.",
-                );
+                if (
+                  ["INVALID_CHAT", "CHAT_RATE_LIMIT"].includes(
+                    message.code ?? "",
+                  )
+                )
+                  notifyRef.current(
+                    message.message ?? "Message could not be sent.",
+                  );
+                else
+                  setError(
+                    message.message ?? "The meeting server reported an error.",
+                  );
             } catch (error) {
               signalPeer?.diagnostics.signalingError(error);
               if (!cancelled)
@@ -457,6 +472,17 @@ export function useConference(
     }
     void retryRef.current?.().catch((error) => setError(errorMessage(error)));
   }
+  function sendChat(text: string) {
+    const socket = socketRef.current;
+    if (
+      socket?.readyState !== WebSocket.OPEN ||
+      !text.trim() ||
+      text.trim().length > 2000
+    )
+      return false;
+    socket.send(JSON.stringify({ type: "chat", text: text.trim() }));
+    return true;
+  }
   async function diagnostics() {
     return JSON.stringify(
       {
@@ -482,5 +508,7 @@ export function useConference(
     command,
     retryMedia,
     diagnostics,
+    chatMessages,
+    sendChat,
   };
 }

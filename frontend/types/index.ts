@@ -36,6 +36,13 @@ export interface Admission {
   participant_token: string;
   meeting: Meeting;
 }
+export interface ChatMessage {
+  id: string;
+  participant_id: number;
+  display_name: string;
+  text: string;
+  sent_at: string;
+}
 export interface ScheduleInput {
   title: string;
   description: string;

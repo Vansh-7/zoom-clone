@@ -1,4 +1,5 @@
 import time
+from contextlib import ExitStack
 
 from starlette.websockets import WebSocketDisconnect
 import pytest
@@ -38,6 +39,53 @@ def test_ws_auth_and_origin(client):
     with client.websocket_connect(f"/ws/meetings/{code}", headers=ORIGIN) as ws:
         ws.send_json({"type": "auth", "token": "forged"})
         assert ws.receive_json()["code"] == "INVALID_SESSION"
+
+
+def test_chat_validation_identity_rate_limit_and_room_isolation(client):
+    one, two = create(client), create(client)
+    admissions = [
+        admit(client, one, "Host", True),
+        admit(client, one, "Guest"),
+        admit(client, two, "Other", True),
+    ]
+    with ExitStack() as stack:
+        sockets = []
+        for created, admission in zip([one, one, two], admissions):
+            ws = stack.enter_context(
+                client.websocket_connect(
+                    f"/ws/meetings/{created['meeting']['meeting_code']}", headers=ORIGIN
+                )
+            )
+            connect(ws, admission)
+            sockets.append(ws)
+        host, guest, other = sockets
+        assert host.receive_json()["type"] == "participant-joined"
+        for text in [None, 17, "  ", "x" * 2001]:
+            guest.send_json({"type": "chat", "text": text})
+            assert guest.receive_json()["code"] == "INVALID_CHAT"
+        host.send_json(
+            {
+                "type": "chat",
+                "text": "  Hello, team!  ",
+                "display_name": "Forged",
+                "participant_id": 999,
+                "sent_at": "forged",
+            }
+        )
+        message = host.receive_json()
+        assert guest.receive_json() == message
+        chat = message["chat"]
+        assert chat["text"] == "Hello, team!" and chat["display_name"] == "Host"
+        assert chat["participant_id"] == admissions[0]["participant"]["id"]
+        assert len(chat["id"]) == 32 and chat["sent_at"].endswith("+00:00")
+        host.send_json({"type": "chat", "text": "Too soon"})
+        assert host.receive_json()["code"] == "CHAT_RATE_LIMIT"
+        # Ping is an ordering barrier: a leaked chat would arrive before its pong.
+        other.send_json({"type": "ping"})
+        assert other.receive_json() == {"type": "pong"}
+        guest.send_json({"type": "chat", "text": "<script>plain text</script>"})
+        assert guest.receive_json()["chat"]["display_name"] == "Guest"
+        assert host.receive_json()["chat"]["text"] == "<script>plain text</script>"
 
 
 def test_signaling_roster_host_controls_and_revocation(client):

@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+import time
+import uuid
 from dataclasses import dataclass, field
 
 import anyio
@@ -26,6 +28,7 @@ class Connection:
     audio_enabled: bool = False
     video_enabled: bool = False
     screen_sharing: bool = False
+    last_chat_at: float = 0
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def public(self):
@@ -253,6 +256,37 @@ class RoomManager:
                         await self.broadcast(
                             code,
                             {"type": "media-state", "participant": connection.public()},
+                        )
+                    elif kind == "chat":
+                        text = message.get("text")
+                        if (
+                            not isinstance(text, str)
+                            or not 1 <= len(text.strip()) <= 2000
+                        ):
+                            raise AppError(
+                                422,
+                                "INVALID_CHAT",
+                                "Messages must contain 1–2000 characters.",
+                            )
+                        if time.monotonic() - connection.last_chat_at < 0.5:
+                            raise AppError(
+                                429,
+                                "CHAT_RATE_LIMIT",
+                                "Please wait a moment before sending another message.",
+                            )
+                        connection.last_chat_at = time.monotonic()
+                        await self.broadcast(
+                            code,
+                            {
+                                "type": "chat",
+                                "chat": {
+                                    "id": uuid.uuid4().hex,
+                                    "participant_id": connection.id,
+                                    "display_name": connection.display_name,
+                                    "text": text.strip(),
+                                    "sent_at": utcnow().isoformat(),
+                                },
+                            },
                         )
                     elif kind in ("mute-all", "remove-participant"):
                         if connection.role != "host":
