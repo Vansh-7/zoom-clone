@@ -1,5 +1,7 @@
 # Zoom Workplace — Scaler Fullstack Assignment
 
+[![Application checks](https://github.com/Vansh-7/zoom-clone/actions/workflows/ci.yml/badge.svg)](https://github.com/Vansh-7/zoom-clone/actions/workflows/ci.yml)
+
 A Zoom-inspired meeting application with a real Next.js frontend, FastAPI backend, SQLite persistence, and peer-to-peer WebRTC audio/video. No login is required: Alex Morgan is the default organizer. All meeting lists and workflows use the API and database.
 
 This is an original educational implementation, not an official Zoom product. Visual references: [Zoom home](https://assets.zoom.us/images/en-us/desktop/generic/home/home-screen.png) and [Zoom gallery view](https://developers.zoom.us/img/msdk-web-client-view-gallery.png).
@@ -195,7 +197,7 @@ The following checks were executed locally on 8 October 2026:
 | SQLite persistence | Scheduled records survived backend and container restarts; six seed identities and timestamps remained unchanged |
 | Production dependency audit | 0 vulnerabilities reported |
 
-Backend tests use temporary SQLite files. Browser tests create real records in the development database and inspect nonzero inbound audio/video RTP packets in both browser contexts. GitHub Actions is configured but has not yet run remotely. The backend test adapter emits a Starlette deprecation warning; all tests pass.
+Backend tests use temporary SQLite files. Browser tests create real records in the development database and inspect nonzero inbound audio/video RTP packets in both browser contexts. [GitHub Actions](https://github.com/Vansh-7/zoom-clone/actions/workflows/ci.yml) runs backend, frontend, and browser checks on pushes and pull requests. The backend test adapter emits a Starlette deprecation warning; all tests pass.
 
 Run backend checks from `backend`:
 
