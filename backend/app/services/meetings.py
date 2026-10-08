@@ -63,6 +63,8 @@ def get_meeting(db: Session, code: str) -> Meeting:
 
 def list_meetings(db: Session, section: str | None = None):
     reconcile_schedules(db)
+    if get_settings().seed_data:
+        replenish_samples(db)
     query = select(Meeting)
     if section == "upcoming":
         query = query.where(Meeting.status.in_(["scheduled", "in_progress"])).order_by(
@@ -321,3 +323,56 @@ def seed_database(db: Session, samples: bool = True):
             )
         )
     db.commit()
+    replenish_samples(db)
+
+
+def replenish_samples(db: Session):
+    """Keep one future, unclaimed demo per slot without changing existing records."""
+    now = utcnow()
+    user = default_user(db)
+    if user is None:
+        return
+    for index, (title, hours) in enumerate(
+        [
+            ("Product design sync", 2),
+            ("Engineering standup", 24),
+            ("Weekly team catch-up", 48),
+        ]
+    ):
+        prefix = f"sample-upcoming-{index}-"
+        available = db.scalar(
+            select(Meeting.id).where(
+                (Meeting.seed_key == f"sample-v1-{index}")
+                | Meeting.seed_key.startswith(prefix),
+                Meeting.status == "scheduled",
+                Meeting.host_token_hash.is_(None),
+                Meeting.scheduled_at > now,
+            )
+        )
+        # At most one replacement per slot per UTC day. Unique seed_key also
+        # protects simultaneous dashboard reads and repeated process starts.
+        key = f"{prefix}{now.date().isoformat()}"
+        if available or db.scalar(select(Meeting.id).where(Meeting.seed_key == key)):
+            continue
+        for _ in range(5):
+            try:
+                with db.begin_nested():
+                    db.add(
+                        Meeting(
+                            meeting_code=generate_code(),
+                            host_id=user.id,
+                            title=title,
+                            description="Sample meeting — claim host access to try a call.",
+                            kind="scheduled",
+                            status="scheduled",
+                            scheduled_at=now + timedelta(hours=hours),
+                            duration_minutes=30 if index % 2 == 0 else 60,
+                            scheduled_timezone="UTC",
+                            seed_key=key,
+                        )
+                    )
+                break
+            except IntegrityError:
+                if db.scalar(select(Meeting.id).where(Meeting.seed_key == key)):
+                    break
+        db.commit()

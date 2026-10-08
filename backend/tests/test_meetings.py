@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.database import SessionLocal, utcnow
 from app.models import Meeting, User
-from app.services.meetings import seed_database
+from app.services.meetings import replenish_samples, seed_database
 
 
 def create(client):
@@ -260,3 +260,86 @@ def test_cors(client):
             "/api/meetings", headers={"Origin": "https://evil.example"}
         ).headers
     )
+
+
+def test_samples_replenish_days_later_without_rewriting_history(client):
+    real = client.post("/api/meetings/schedule", json=schedule_body()).json()["meeting"]
+    now = utcnow()
+    with SessionLocal() as db:
+        original = {
+            m.meeting_code: (m.scheduled_at, m.title, m.host_token_hash)
+            for m in db.scalars(select(Meeting))
+        }
+    with patch("app.services.meetings.utcnow", return_value=now + timedelta(days=7)):
+        upcoming = client.get("/api/meetings/upcoming").json()
+        assert len(upcoming) == 3
+        assert all(m["can_claim"] for m in upcoming)
+        assert all(
+            datetime.fromisoformat(
+                m["scheduled_at"].replace("Z", "+00:00")
+            )
+            > now + timedelta(days=7)
+            for m in upcoming
+        )
+        codes = {m["meeting_code"] for m in upcoming}
+        with SessionLocal() as db:
+            seed_database(db)
+            replenish_samples(db)
+            assert db.scalar(select(func.count()).select_from(Meeting)) == 10
+            for code, values in original.items():
+                m = db.scalar(select(Meeting).where(Meeting.meeting_code == code))
+                assert (m.scheduled_at, m.title, m.host_token_hash) == values
+        assert codes == {
+            m["meeting_code"] for m in client.get("/api/meetings/upcoming").json()
+        }
+        assert real["meeting_code"] in {
+            m["meeting_code"] for m in client.get("/api/meetings/recent").json()
+        }
+
+
+def test_claimed_demo_is_preserved_and_daily_replenishment_is_bounded(client):
+    sample = client.get("/api/meetings/upcoming").json()[0]
+    code = sample["meeting_code"]
+    claim = client.post(f"/api/meetings/{code}/claim").json()
+    for _ in range(3):
+        client.get("/api/meetings/upcoming")
+    with SessionLocal() as db:
+        assert db.scalar(select(func.count()).select_from(Meeting)) == 7
+        claimed = db.scalar(select(Meeting).where(Meeting.meeting_code == code))
+        assert (
+            claimed.host_token_hash
+            and claimed.scheduled_at.isoformat().replace("+00:00", "Z")
+            == sample["scheduled_at"]
+        )
+    assert (
+        client.post(
+            f"/api/meetings/{code}/start", headers=host_header(claim)
+        ).status_code
+        == 200
+    )
+    # Claiming the replacement cannot create unlimited new samples on the same day.
+    replacement = next(
+        m
+        for m in client.get("/api/meetings/upcoming").json()
+        if m["title"] == sample["title"] and m["can_claim"]
+    )
+    client.post(f"/api/meetings/{replacement['meeting_code']}/claim")
+    client.get("/api/meetings/upcoming")
+    with SessionLocal() as db:
+        assert db.scalar(select(func.count()).select_from(Meeting)) == 7
+
+
+def test_replenishment_retries_code_collision_and_respects_seed_setting(client):
+    now = utcnow() + timedelta(days=7)
+    with (
+        patch("app.services.meetings.utcnow", return_value=now),
+        patch(
+            "app.services.meetings.generate_code",
+            side_effect=["81234567000", "99999999991", "99999999992", "99999999993"],
+        ),
+    ):
+        with SessionLocal() as db:
+            seed_database(db, samples=False)
+            assert db.scalar(select(func.count()).select_from(Meeting)) == 6
+            replenish_samples(db)
+            assert db.scalar(select(func.count()).select_from(Meeting)) == 9
