@@ -90,6 +90,17 @@ class RoomManager:
         connections = list(self.rooms.get(code, {}).values())
         await asyncio.gather(*(c.send(message) for c in connections if c.id != exclude))
 
+    async def disconnect_participant(self, code: str, participant_id: int):
+        connection = self.rooms.get(code, {}).pop(participant_id, None)
+        if connection:
+            await self.broadcast(
+                code, {"type": "participant-left", "id": participant_id}
+            )
+            try:
+                await connection.socket.close(code=1000)
+            except (RuntimeError, OSError):
+                pass
+
     async def close_room(self, code: str):
         timer = self.host_timers.pop(code, None)
         if timer and timer is not asyncio.current_task():

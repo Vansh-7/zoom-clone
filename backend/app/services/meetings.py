@@ -263,10 +263,11 @@ def end_meeting(db: Session, meeting: Meeting):
         db.commit()
 
 
-def leave_meeting(db: Session, meeting: Meeting, token: str | None):
+def leave_meeting(db: Session, meeting: Meeting, token: str | None) -> int:
     participant = get_participant(db, meeting, token)
     participant.left_at = utcnow()
     db.commit()
+    return participant.id
 
 
 def seed_database(db: Session, samples: bool = True):

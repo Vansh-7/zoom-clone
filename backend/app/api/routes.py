@@ -104,9 +104,13 @@ def join(code: str, body: JoinInput, db: DB, token: Token):
 
 
 @router.post("/meetings/{code}/leave")
-def leave(code: str, db: DB, token: Token):
-    meeting = service.get_meeting(db, code)
-    service.leave_meeting(db, meeting, token)
+async def leave(code: str, db: DB, token: Token):
+    def finish():
+        meeting = service.get_meeting(db, code)
+        return service.leave_meeting(db, meeting, token)
+
+    participant_id = await run_in_threadpool(finish)
+    await manager.disconnect_participant(code, participant_id)
     return {"success": True}
 
 

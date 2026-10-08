@@ -3,6 +3,7 @@ import time
 from starlette.websockets import WebSocketDisconnect
 import pytest
 
+from app.websocket.manager import manager
 from test_meetings import create, host_header
 
 ORIGIN = {"origin": "http://localhost:3000"}
@@ -86,6 +87,34 @@ def test_signaling_roster_host_controls_and_revocation(client):
     with client.websocket_connect(f"/ws/meetings/{code}", headers=ORIGIN) as ws:
         ws.send_json({"type": "auth", "token": guest["participant_token"]})
         assert ws.receive_json()["code"] == "INVALID_SESSION"
+
+
+def test_rest_leave_closes_signaling_before_browser_navigation(client):
+    created = create(client)
+    code = created["meeting"]["meeting_code"]
+    host, guest = admit(client, created, "Host", True), admit(client, created, "Guest")
+    with client.websocket_connect(f"/ws/meetings/{code}", headers=ORIGIN) as host_ws:
+        connect(host_ws, host)
+        with client.websocket_connect(
+            f"/ws/meetings/{code}", headers=ORIGIN
+        ) as guest_ws:
+            connect(guest_ws, guest)
+            assert host_ws.receive_json()["type"] == "participant-joined"
+            response = client.post(
+                f"/api/meetings/{code}/leave",
+                headers={"Authorization": "Bearer " + guest["participant_token"]},
+            )
+            assert response.status_code == 200
+            assert guest["participant"]["id"] not in manager.rooms[code]
+            assert host_ws.receive_json() == {
+                "type": "participant-left",
+                "id": guest["participant"]["id"],
+            }
+            with pytest.raises(WebSocketDisconnect):
+                guest_ws.receive_json()
+        with client.websocket_connect(f"/ws/meetings/{code}", headers=ORIGIN) as ws:
+            ws.send_json({"type": "auth", "token": guest["participant_token"]})
+            assert ws.receive_json()["code"] == "INVALID_SESSION"
 
 
 def test_room_isolation_and_unexpected_departure(client):
