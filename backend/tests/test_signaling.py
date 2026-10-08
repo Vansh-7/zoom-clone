@@ -51,6 +51,21 @@ def test_signaling_roster_host_controls_and_revocation(client):
         ) as guest_ws:
             assert len(connect(guest_ws, guest)["participants"]) == 2
             assert host_ws.receive_json()["type"] == "participant-joined"
+            guest_ws.send_json(
+                {"type": "restart-ice", "target": host["participant"]["id"]}
+            )
+            assert host_ws.receive_json()["type"] == "restart-ice"
+            host_ws.send_json(
+                {
+                    "type": "candidate",
+                    "target": guest["participant"]["id"],
+                    "payload": {"candidate": "", "usernameFragment": "test-generation"},
+                }
+            )
+            assert guest_ws.receive_json()["payload"] == {
+                "candidate": "",
+                "usernameFragment": "test-generation",
+            }
             host_ws.send_json(
                 {
                     "type": "offer",
@@ -132,6 +147,7 @@ def test_room_isolation_and_unexpected_departure(client):
             }
         )
         ws.send_json({"type": "ping"})
+        assert ws.receive_json()["code"] == "PEER_UNAVAILABLE"
         assert ws.receive_json()["type"] == "pong"
     time.sleep(0.1)
     assert client.get(f"/api/meetings/{code}").json()["status"] == "ended"

@@ -177,18 +177,78 @@ test("guest waits until the creating browser starts the meeting", async ({
   await context.close();
 });
 
-async function capturePeers(page: Page) {
-  await page.addInitScript(() => {
+async function capturePeers(page: Page, duplicateJoin = false) {
+  await page.addInitScript((duplicateJoin) => {
     const Original = window.RTCPeerConnection;
     const peers: RTCPeerConnection[] = [];
     Object.defineProperty(window, "__testPeers", { value: peers });
     window.RTCPeerConnection = class extends Original {
+      offerCount = 0;
       constructor(config?: RTCConfiguration) {
         super(config);
         peers.push(this);
+        const originalOffer = this.createOffer.bind(this);
+        this.createOffer = (async (options?: RTCOfferOptions) => {
+          this.offerCount++;
+          if (duplicateJoin)
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          return originalOffer(options);
+        }) as RTCPeerConnection["createOffer"];
       }
     };
-  });
+    if (duplicateJoin) {
+      const OriginalSocket = window.WebSocket;
+      window.WebSocket = class extends OriginalSocket {
+        pendingOffer: string | null = null;
+        sawCandidate = false;
+        send(data: string | ArrayBufferLike | Blob | ArrayBufferView) {
+          if (this.url.includes("/ws/meetings/") && typeof data === "string") {
+            const message = JSON.parse(data);
+            if (message.type === "offer" && !this.sawCandidate) {
+              this.pendingOffer = data;
+              // Exercise ICE arriving before its description, not just the usual order.
+              setTimeout(() => {
+                if (this.pendingOffer && this.readyState === WebSocket.OPEN) {
+                  super.send(this.pendingOffer);
+                  this.pendingOffer = null;
+                }
+              }, 500);
+              return;
+            }
+            if (message.type === "candidate") {
+              this.sawCandidate = true;
+              if (this.pendingOffer) {
+                super.send(data);
+                super.send(this.pendingOffer);
+                this.pendingOffer = null;
+                return;
+              }
+            }
+          }
+          super.send(data);
+        }
+        constructor(url: string | URL, protocols?: string | string[]) {
+          super(url, protocols);
+          let duplicated = false;
+          this.addEventListener("message", (event) => {
+            if (
+              !duplicated &&
+              typeof event.data === "string" &&
+              this.url.includes("/ws/meetings/") &&
+              JSON.parse(event.data).type === "participant-joined"
+            ) {
+              duplicated = true;
+              queueMicrotask(() =>
+                this.dispatchEvent(
+                  new MessageEvent("message", { data: event.data }),
+                ),
+              );
+            }
+          });
+        }
+      };
+    }
+  }, duplicateJoin);
 }
 
 async function inboundPackets(page: Page, kind: string) {
@@ -230,7 +290,7 @@ test("two-person audio/video, mute, leave, removal, and end for all", async ({
   const errors: string[] = [];
   host.on("pageerror", (error) => errors.push(error.message));
   guest.on("pageerror", (error) => errors.push(error.message));
-  await capturePeers(host);
+  await capturePeers(host, true);
   await capturePeers(guest);
   await host.goto("/");
   await host.getByRole("button", { name: "New Meeting", exact: true }).click();
@@ -274,6 +334,16 @@ test("two-person audio/video, mute, leave, removal, and end for all", async ({
   await expect(guest.locator(".room-connection")).toContainText("Connected");
   await expect(host.locator(".video-tile")).toHaveCount(2);
   await expect(guest.locator(".video-tile")).toHaveCount(2);
+  await expect
+    .poll(() =>
+      host.evaluate(() => {
+        const peers = (
+          window as Window & { __testPeers?: { offerCount: number }[] }
+        ).__testPeers;
+        return peers?.[0]?.offerCount;
+      }),
+    )
+    .toBe(1);
   for (const page of [host, guest]) {
     await expect
       .poll(() => inboundPackets(page, "video"), { timeout: 20000 })

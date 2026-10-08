@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from dataclasses import dataclass, field
 
 import anyio
@@ -12,6 +13,8 @@ from app.config import get_settings
 from app.database import SessionLocal, utcnow
 from app.models import Meeting, MeetingParticipant
 from app.services.meetings import AppError, end_meeting, get_meeting, get_participant
+
+logger = logging.getLogger("uvicorn.error")
 
 
 @dataclass
@@ -192,7 +195,7 @@ class RoomManager:
                         continue
                     # Revalidate persisted membership before every meaningful command.
                     await run_in_threadpool(authenticate, code, auth["token"])
-                    if kind in ("offer", "answer", "candidate"):
+                    if kind in ("offer", "answer", "candidate", "restart-ice"):
                         target_id, payload = (
                             message.get("target"),
                             message.get("payload"),
@@ -200,7 +203,7 @@ class RoomManager:
                         if (
                             not isinstance(target_id, int)
                             or target_id == connection.id
-                            or not isinstance(payload, dict)
+                            or (kind != "restart-ice" and not isinstance(payload, dict))
                         ):
                             raise ValueError("Invalid signaling target or payload")
                         if kind in ("offer", "answer") and (
@@ -214,12 +217,25 @@ class RoomManager:
                             raise ValueError("Invalid ICE candidate")
                         target = self.rooms.get(code, {}).get(target_id)
                         if target:
+                            logger.info(
+                                "rtc_signal type=%s meeting=%s sender=%s target=%s",
+                                kind,
+                                code,
+                                connection.id,
+                                target_id,
+                            )
                             await target.send(
                                 {
                                     "type": kind,
                                     "sender": connection.id,
                                     "payload": payload,
                                 }
+                            )
+                        else:
+                            raise AppError(
+                                409,
+                                "PEER_UNAVAILABLE",
+                                "The other participant disconnected. Wait for them to rejoin.",
                             )
                     elif kind == "media-state":
                         if not isinstance(
@@ -265,6 +281,12 @@ class RoomManager:
                     else:
                         raise ValueError("Unknown message type")
                 except (ValueError, AppError) as exc:
+                    logger.warning(
+                        "rtc_signal_rejected meeting=%s participant=%s code=%s",
+                        code,
+                        connection.id,
+                        getattr(exc, "code", "INVALID_MESSAGE"),
+                    )
                     await connection.send(
                         {
                             "type": "error",

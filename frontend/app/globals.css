@@ -1999,6 +1999,10 @@ select {
   display: flex;
   justify-content: space-between;
   gap: 15px;
+  flex-wrap: wrap;
+}
+.room-error > span {
+  flex: 1 1 240px;
 }
 .room-error > button {
   color: #e8bfa3;

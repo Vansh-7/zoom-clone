@@ -491,7 +491,29 @@ export function MeetingRoom({ code }: { code: string }) {
         <main className="meeting-stage">
           {conference.error || error ? (
             <div className="room-error" role="alert">
-              {conference.error || error}
+              <span>{conference.error || error}</span>
+              {conference.error && conference.connection === "connected" && (
+                <button onClick={conference.retryMedia}>
+                  Retry media connection
+                </button>
+              )}
+              {conference.error && (
+                <button
+                  onClick={() =>
+                    void conference
+                      .diagnostics()
+                      .then(copyText)
+                      .then(() => notify("Connection diagnostics copied"))
+                      .catch(() =>
+                        notify(
+                          "Clipboard access was blocked. Allow it and try again.",
+                        ),
+                      )
+                  }
+                >
+                  Copy connection diagnostics
+                </button>
+              )}
               {conference.connection === "disconnected" && (
                 <button onClick={() => window.location.reload()}>
                   Rejoin meeting
