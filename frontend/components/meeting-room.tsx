@@ -43,6 +43,7 @@ import type { Admission, Meeting, Participant } from "@/types";
 import { MeetingDetails } from "./meeting-dialogs";
 import { MeetingChat } from "./meeting-chat";
 import { ConnectionStatus } from "./connection-status";
+import { DeviceSelectors } from "./device-selectors";
 import { WorkspaceShell } from "./workspace-shell";
 import { WorkplaceBrand } from "./workplace-brand";
 import { ErrorNotice, Modal, Spinner, useToast } from "./ui";
@@ -374,6 +375,12 @@ export function MeetingRoom({ code }: { code: string }) {
                         : "Your microphone and camera are off"}
                   </span>
                 </div>
+                <DeviceSelectors
+                  devices={media.devices}
+                  selected={media.deviceIds}
+                  pending={media.pending}
+                  onSelect={media.selectDevice}
+                />
                 {Object.values(media.issues).map((issue) => (
                   <p className="media-warning" role="status" key={issue}>
                     {issue}

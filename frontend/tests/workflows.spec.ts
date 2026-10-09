@@ -805,17 +805,33 @@ test("permission denial still allows a mobile guest to join without media", asyn
   });
   const page = await context.newPage();
   await page.addInitScript(() => {
-    navigator.mediaDevices.getUserMedia = async () => {
-      throw new DOMException("Permission denied", "NotAllowedError");
-    };
+    if (navigator.mediaDevices)
+      navigator.mediaDevices.getUserMedia = async () => {
+        throw new DOMException("Permission denied", "NotAllowedError");
+      };
   });
   await page.goto(`/meeting/${created.meeting.meeting_code}`);
+  const captureSupported = await page.evaluate(
+    () => !!navigator.mediaDevices?.getUserMedia,
+  );
   await page.getByLabel("Your name", { exact: true }).fill("Mobile Guest");
   await page
     .getByRole("button", { name: "Enable camera & microphone", exact: true })
     .click();
-  await expect(page.getByText(/Your camera is blocked/)).toBeVisible();
-  await expect(page.getByText(/Your microphone is blocked/)).toBeVisible();
+  await expect(
+    page.getByText(
+      captureSupported
+        ? /Your camera is blocked/
+        : /Camera access is unavailable/,
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      captureSupported
+        ? /Your microphone is blocked/
+        : /Microphone access is unavailable/,
+    ),
+  ).toBeVisible();
   await page.screenshot({
     path: screenshot("mobile-prejoin-permission.png"),
     fullPage: true,
