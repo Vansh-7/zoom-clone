@@ -165,7 +165,11 @@ def test_real_meetings_cannot_be_claimed(client):
     assert client.post(f"/api/meetings/{code}/claim").status_code == 403
 
 
-def test_join_validation_roles_capacity_and_leave(client):
+@pytest.mark.parametrize("capacity", [2, 4])
+def test_join_validation_roles_capacity_and_leave(client, monkeypatch, capacity):
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "max_participants", capacity)
     meeting = create(client)
     code = meeting["meeting"]["meeting_code"]
     assert (
@@ -198,12 +202,21 @@ def test_join_validation_roles_capacity_and_leave(client):
         f"/api/meetings/{code}/join", json={"display_name": "Sam"}
     ).json()
     assert guest["participant"]["role"] == "guest"
-    assert (
-        client.post(
-            f"/api/meetings/{code}/join", json={"display_name": "Third"}
-        ).json()["error"]["code"]
-        == "MEETING_FULL"
+    for index in range(capacity - 2):
+        assert (
+            client.post(
+                f"/api/meetings/{code}/join", json={"display_name": f"Guest {index}"}
+            ).status_code
+            == 201
+        )
+    full = client.post(
+        f"/api/meetings/{code}/join", json={"display_name": "Overflow guest"}
     )
+    assert full.status_code == 409
+    assert full.json()["error"] == {
+        "code": "MEETING_FULL",
+        "message": f"This meeting supports up to {capacity} participants. The room is full.",
+    }
     header = {"Authorization": "Bearer " + guest["participant_token"]}
     assert client.post(f"/api/meetings/{code}/leave", headers=header).status_code == 200
     assert client.post(f"/api/meetings/{code}/leave", headers=header).status_code == 401

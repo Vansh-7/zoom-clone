@@ -78,7 +78,7 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     seed_data: bool = True
-    max_participants: int = 2
+    max_participants: int = 4
     disconnect_grace_seconds: float = 30
     ice_servers_json: str = '[{"urls":"stun:stun.l.google.com:19302"}]'
     ice_transport_policy: Literal["all", "relay"] = "all"

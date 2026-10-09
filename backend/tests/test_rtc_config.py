@@ -6,6 +6,14 @@ from pydantic import ValidationError
 from app.config import Settings, get_settings
 
 
+def test_default_capacity_is_four_and_advertised(client, monkeypatch):
+    monkeypatch.delenv("MAX_PARTICIPANTS", raising=False)
+    capacity = Settings(_env_file=None).max_participants
+    assert capacity == 4
+    monkeypatch.setattr(get_settings(), "max_participants", capacity)
+    assert client.get("/api/rtc-config").json()["max_participants"] == 4
+
+
 def test_stun_and_authenticated_turn_roundtrip(client, monkeypatch):
     servers = [
         {"urls": "stun:stun.example.com:3478"},

@@ -215,7 +215,7 @@ def join_meeting(db: Session, meeting: Meeting, name: str, host_token: str | Non
         raise AppError(
             409,
             "MEETING_FULL",
-            f"This demo supports {get_settings().max_participants} participants. The room is full.",
+            f"This meeting supports up to {get_settings().max_participants} participants. The room is full.",
         )
     token = secrets.token_urlsafe(32)
     participant = MeetingParticipant(
