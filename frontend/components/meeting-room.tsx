@@ -13,6 +13,10 @@ import {
   ArrowLeft,
   Check,
   ChevronDown,
+  Grid2X2,
+  Heart,
+  Hand,
+  MoreHorizontal,
   Expand,
   Info,
   Link2,
@@ -39,10 +43,13 @@ import {
 import { useLocalMedia } from "@/hooks/use-local-media";
 import { useConference } from "@/hooks/use-conference";
 import { useScreenShare } from "@/hooks/use-screen-share";
-import type { Admission, Meeting, Participant } from "@/types";
+import type { Admission, Meeting, Participant, Reaction } from "@/types";
+import { reactions } from "@/lib/reactions";
+import { RoomPopover } from "./room-popover";
 import { MeetingDetails } from "./meeting-dialogs";
 import { MeetingChat } from "./meeting-chat";
 import { ConnectionStatus } from "./connection-status";
+import { RemoteAudio } from "./remote-audio";
 import { DeviceSelectors } from "./device-selectors";
 import { WorkspaceShell } from "./workspace-shell";
 import { WorkplaceBrand } from "./workplace-brand";
@@ -55,6 +62,8 @@ function VideoTile({
   screen = false,
   videoEnabled,
   connectionState,
+  reaction,
+  onSelect,
 }: {
   stream?: MediaStream | null;
   participant: Participant;
@@ -62,6 +71,8 @@ function VideoTile({
   screen?: boolean;
   videoEnabled: boolean;
   connectionState?: string;
+  reaction?: Reaction;
+  onSelect?: () => void;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
@@ -94,7 +105,7 @@ function VideoTile({
         ref={video}
         autoPlay
         playsInline
-        muted={local || screen}
+        muted
         className={`${local && !screen ? "mirrored" : ""} ${videoEnabled && stream ? "" : "video-hidden"}`}
         aria-label={`${participant.display_name}${local ? " (you)" : ""} ${screen ? "screen" : "video"}`}
       />
@@ -124,7 +135,7 @@ function VideoTile({
       </div>
       {autoplayBlocked && (
         <button
-          className="play-audio"
+          className="play-video"
           onClick={() => {
             void video.current
               ?.play()
@@ -132,8 +143,34 @@ function VideoTile({
               .catch(() => setAutoplayBlocked(true));
           }}
         >
-          Click to enable audio
+          Play video
         </button>
+      )}
+      {onSelect && (
+        <button
+          className="select-speaker"
+          onClick={onSelect}
+          aria-label={`Spotlight ${participant.display_name}`}
+        />
+      )}
+      {reaction && !screen && (
+        <span
+          className="tile-reaction"
+          role="img"
+          aria-label={`${participant.display_name}: ${reactions.find((item) => item.type === reaction)?.label}`}
+          key={reaction}
+        >
+          {reactions.find((item) => item.type === reaction)?.emoji}
+        </span>
+      )}
+      {participant.hand_raised && !screen && (
+        <span
+          className="tile-hand"
+          role="img"
+          aria-label={`${participant.display_name} raised hand`}
+        >
+          ✋
+        </span>
       )}
     </div>
   );
@@ -158,6 +195,22 @@ export function MeetingRoom({ code }: { code: string }) {
   const [removeTarget, setRemoveTarget] = useState<Participant | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [duration, setDuration] = useState(0);
+  const [popover, setPopover] = useState<
+    "info" | "view" | "reactions" | "more" | null
+  >(null);
+  const [view, setView] = useState<"gallery" | "speaker">("gallery");
+  const [hideSelf, setHideSelf] = useState(false);
+  const [speakerId, setSpeakerId] = useState<number | null>(null);
+  const [hostToolsOpen, setHostToolsOpen] = useState(false);
+  const lastReaction = useRef(0);
+  const closePopover = useCallback(() => setPopover(null), []);
+  function fullscreen() {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else
+      void document.documentElement
+        .requestFullscreen()
+        .catch(() => notify("Full screen isn't available in this browser."));
+  }
   const media = useLocalMedia();
   const screen = useScreenShare();
   const conference = useConference(
@@ -482,27 +535,42 @@ export function MeetingRoom({ code }: { code: string }) {
   const others = conference.participants.filter(
     (participant) => participant.id !== admission.participant.id,
   );
-  const cameras = (
-    <>
-      <VideoTile
-        stream={media.stream}
-        participant={{ ...self, audio_enabled: media.audioEnabled }}
-        local
-        videoEnabled={media.videoEnabled}
-      />
-      {others.map((participant) => (
-        <VideoTile
-          key={participant.id}
-          participant={participant}
-          stream={conference.remoteStreams[participant.id]}
-          videoEnabled={!!participant.video_enabled}
-          connectionState={
-            conference.peerStates[participant.id] ?? "connecting"
-          }
-        />
-      ))}
-    </>
+  const visible = [self, ...others].filter(
+    (participant) => !hideSelf || participant.id !== self.id,
   );
+  const speaker =
+    visible.find((participant) => participant.id === speakerId) ??
+    visible.find((participant) => participant.id !== self.id) ??
+    visible[0];
+  const camera = (participant: Participant, selectable = false) => (
+    <VideoTile
+      key={participant.id}
+      stream={
+        participant.id === self.id
+          ? media.stream
+          : conference.remoteStreams[participant.id]
+      }
+      participant={
+        participant.id === self.id
+          ? { ...self, audio_enabled: media.audioEnabled }
+          : participant
+      }
+      local={participant.id === self.id}
+      videoEnabled={
+        participant.id === self.id
+          ? media.videoEnabled
+          : !!participant.video_enabled
+      }
+      connectionState={
+        participant.id === self.id
+          ? undefined
+          : (conference.peerStates[participant.id] ?? "connecting")
+      }
+      reaction={conference.reactions[participant.id]}
+      onSelect={selectable ? () => setSpeakerId(participant.id) : undefined}
+    />
+  );
+  const cameras = visible.map((participant) => camera(participant));
   const presenters = others.filter((participant) => participant.screen_sharing);
   const presenting = screen.sharing || presenters.length > 0;
   return (
@@ -519,10 +587,40 @@ export function MeetingRoom({ code }: { code: string }) {
         <header className="room-header">
           <div className="room-topic">
             <ShieldCheck size={17} />
-            <button onClick={() => setDetailsOpen(true)}>
-              {meeting?.title}
-              <ChevronDown size={13} />
-            </button>
+            <RoomPopover
+              placement="below"
+              open={popover === "info"}
+              onClose={closePopover}
+              label="Meeting information"
+              trigger={
+                <button
+                  aria-label="Meeting information"
+                  aria-expanded={popover === "info"}
+                  onClick={() => setPopover(popover === "info" ? null : "info")}
+                >
+                  <span>{meeting?.title}</span>
+                  <ChevronDown size={13} />
+                </button>
+              }
+            >
+              <h2>{meeting?.title}</h2>
+              <dl className="room-info">
+                <dt>Meeting ID</dt>
+                <dd>{formatCode(code)}</dd>
+                <dt>Host</dt>
+                <dd>{meeting?.host_name}</dd>
+                <dt>Invite Link</dt>
+                <dd>
+                  <span>{meeting?.invite_url}</span>
+                  <button
+                    aria-label="Copy invitation URL"
+                    onClick={() => void copy()}
+                  >
+                    <Link2 size={16} />
+                  </button>
+                </dd>
+              </dl>
+            </RoomPopover>
           </div>
           <div className="room-header-right">
             <ConnectionStatus
@@ -536,17 +634,78 @@ export function MeetingRoom({ code }: { code: string }) {
                 .padStart(2, "0")}
               :{(duration % 60).toString().padStart(2, "0")}
             </span>
+            <RoomPopover
+              placement="below"
+              open={popover === "view"}
+              onClose={closePopover}
+              label="Meeting view"
+              trigger={
+                <button
+                  className="room-view-button"
+                  aria-label="Meeting view"
+                  aria-expanded={popover === "view"}
+                  onClick={() => setPopover(popover === "view" ? null : "view")}
+                >
+                  <Grid2X2 size={17} />
+                  <span>View</span>
+                </button>
+              }
+            >
+              <button
+                aria-pressed={view === "gallery"}
+                onClick={() => {
+                  setView("gallery");
+                  closePopover();
+                }}
+              >
+                Gallery View {view === "gallery" && <Check size={16} />}
+              </button>
+              <button
+                aria-pressed={view === "speaker"}
+                onClick={() => setView("speaker")}
+              >
+                Speaker View {view === "speaker" && <Check size={16} />}
+              </button>
+              {view === "speaker" && (
+                <label className="speaker-select">
+                  Spotlight participant
+                  <select
+                    aria-label="Spotlight participant"
+                    value={speaker?.id ?? ""}
+                    onChange={(event) =>
+                      setSpeakerId(Number(event.target.value))
+                    }
+                  >
+                    {visible.map((participant) => (
+                      <option key={participant.id} value={participant.id}>
+                        {participant.display_name}
+                      </option>
+                    ))}
+                  </select>
+                  <span>Select a participant manually.</span>
+                </label>
+              )}
+              <button
+                aria-pressed={hideSelf}
+                onClick={() => {
+                  setHideSelf(!hideSelf);
+                  closePopover();
+                }}
+              >
+                {hideSelf ? "Show Self View" : "Hide Self View"}
+              </button>
+              <button
+                onClick={() => {
+                  fullscreen();
+                  closePopover();
+                }}
+              >
+                Fullscreen <Expand size={16} />
+              </button>
+            </RoomPopover>
             <button
               className="room-view-button"
-              onClick={() => {
-                if (document.fullscreenElement) void document.exitFullscreen();
-                else
-                  void document.documentElement
-                    .requestFullscreen()
-                    .catch(() =>
-                      notify("Full screen isn't available in this browser."),
-                    );
-              }}
+              onClick={fullscreen}
               aria-label="Toggle full screen"
             >
               <Expand size={15} />
@@ -556,6 +715,7 @@ export function MeetingRoom({ code }: { code: string }) {
         </header>
         <div className="room-content">
           <main className="meeting-stage">
+            <RemoteAudio streams={conference.remoteStreams} />
             {screen.sharing && (
               <div className="sharing-banner" role="status">
                 <MonitorUp size={16} /> You are sharing your screen
@@ -594,42 +754,66 @@ export function MeetingRoom({ code }: { code: string }) {
                 )}
               </div>
             ) : null}
-            {presenting ? (
-              <div className="presentation-layout">
-                <div className="presentation-screens">
-                  {screen.sharing && (
-                    <VideoTile
-                      stream={screen.stream}
-                      participant={self}
-                      local
-                      screen
-                      videoEnabled
-                    />
+            <div className="stage-media">
+              {presenting ? (
+                <div className="presentation-layout">
+                  <div className="presentation-screens">
+                    {screen.sharing && (
+                      <VideoTile
+                        stream={screen.stream}
+                        participant={self}
+                        local
+                        screen
+                        videoEnabled
+                      />
+                    )}
+                    {presenters.map((participant) => (
+                      <VideoTile
+                        key={participant.id}
+                        stream={conference.remoteScreenStreams[participant.id]}
+                        participant={participant}
+                        screen
+                        videoEnabled
+                        connectionState={
+                          conference.peerStates[participant.id] ?? "connecting"
+                        }
+                      />
+                    ))}
+                  </div>
+                  <div
+                    className="camera-strip"
+                    aria-label="Participant cameras"
+                  >
+                    {cameras}
+                  </div>
+                </div>
+              ) : view === "speaker" && speaker ? (
+                <div className="presentation-layout speaker-layout">
+                  <div className="speaker-primary">{camera(speaker)}</div>
+                  <div
+                    className="camera-strip"
+                    aria-label="Participant cameras"
+                  >
+                    {visible
+                      .filter((participant) => participant.id !== speaker.id)
+                      .map((participant) => camera(participant, true))}
+                  </div>
+                </div>
+              ) : (
+                <div
+                  className={`video-grid ${visible.length <= 1 ? "video-grid-solo" : visible.length >= 3 ? "video-grid-gallery" : ""}`}
+                >
+                  {visible.length ? (
+                    cameras
+                  ) : (
+                    <p className="self-hidden">
+                      Your self view is hidden. Your camera settings are
+                      unchanged.
+                    </p>
                   )}
-                  {presenters.map((participant) => (
-                    <VideoTile
-                      key={participant.id}
-                      stream={conference.remoteScreenStreams[participant.id]}
-                      participant={participant}
-                      screen
-                      videoEnabled
-                      connectionState={
-                        conference.peerStates[participant.id] ?? "connecting"
-                      }
-                    />
-                  ))}
                 </div>
-                <div className="camera-strip" aria-label="Participant cameras">
-                  {cameras}
-                </div>
-              </div>
-            ) : (
-              <div
-                className={`video-grid ${others.length === 0 ? "video-grid-solo" : others.length >= 2 ? "video-grid-gallery" : ""}`}
-              >
-                {cameras}
-              </div>
-            )}
+              )}
+            </div>
             {others.length === 0 && (
               <div className="alone-notice">
                 <Users size={16} />
@@ -657,13 +841,6 @@ export function MeetingRoom({ code }: { code: string }) {
                   <X size={19} />
                 </button>
               </div>
-              <button
-                className="button secondary invite-participants"
-                onClick={() => void copy()}
-              >
-                <Link2 size={15} />
-                Invite
-              </button>
               <div className="participant-list">
                 {(conference.participants.length
                   ? conference.participants
@@ -683,10 +860,23 @@ export function MeetingRoom({ code }: { code: string }) {
                       </span>
                     </div>
                     <span className="participant-mic">
+                      {participant.hand_raised && (
+                        <span
+                          role="img"
+                          aria-label={`${participant.display_name} raised hand`}
+                        >
+                          ✋
+                        </span>
+                      )}
                       {participant.audio_enabled ? (
                         <Mic size={16} />
                       ) : (
                         <MicOff size={16} />
+                      )}
+                      {participant.video_enabled ? (
+                        <Video size={16} />
+                      ) : (
+                        <VideoOff size={16} />
                       )}
                     </span>
                     {isHost && participant.id !== self.id && (
@@ -701,8 +891,15 @@ export function MeetingRoom({ code }: { code: string }) {
                   </div>
                 ))}
               </div>
-              {isHost && (
-                <div className="participants-footer">
+              <div className="participants-footer">
+                <button
+                  className="button secondary"
+                  onClick={() => void copy()}
+                >
+                  <Link2 size={15} />
+                  Invite
+                </button>
+                {isHost && (
                   <button
                     className="button secondary"
                     onClick={() => conference.command("mute-all")}
@@ -711,8 +908,56 @@ export function MeetingRoom({ code }: { code: string }) {
                     <MicOff size={15} />
                     Mute All
                   </button>
-                </div>
-              )}
+                )}
+              </div>
+            </aside>
+          )}
+          {hostToolsOpen && isHost && (
+            <aside
+              className="participants-panel host-panel"
+              aria-label="Host tools"
+            >
+              <div className="participants-heading">
+                <h2>Host tools</h2>
+                <button
+                  className="icon-button"
+                  aria-label="Close host tools"
+                  onClick={() => setHostToolsOpen(false)}
+                >
+                  <X size={19} />
+                </button>
+              </div>
+              <div className="host-actions">
+                <button
+                  className="button secondary"
+                  disabled={conference.connection !== "connected"}
+                  onClick={() => conference.command("mute-all")}
+                >
+                  <MicOff size={17} />
+                  Mute All
+                </button>
+                <p>Participants can unmute themselves.</p>
+                <h3>Manage participants</h3>
+                {others.map((participant) => (
+                  <div className="host-participant" key={participant.id}>
+                    <span>{participant.display_name}</span>
+                    <button
+                      className="button secondary small"
+                      onClick={() => setRemoveTarget(participant)}
+                      aria-label={`Remove ${participant.display_name}`}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                {!others.length && <p>No other participants have joined.</p>}
+                <button
+                  className="button danger"
+                  onClick={() => setConfirmEnd(true)}
+                >
+                  End Meeting for Everyone
+                </button>
+              </div>
             </aside>
           )}
           {chatOpen && (
@@ -754,6 +999,82 @@ export function MeetingRoom({ code }: { code: string }) {
           </div>
           <div className="toolbar-center">
             <button
+              className={`toolbar-control ${rosterOpen ? "toolbar-active" : ""}`}
+              onClick={() => {
+                setRosterOpen(!rosterOpen);
+                setChatOpen(false);
+                setHostToolsOpen(false);
+              }}
+              aria-label="Show participants"
+            >
+              <span className="toolbar-count-icon">
+                <Users size={24} />
+                <small>{conference.participants.length || 1}</small>
+              </span>
+              <span>Participants</span>
+            </button>
+            <button
+              className={`toolbar-control ${chatOpen ? "toolbar-active" : ""}`}
+              onClick={() => {
+                setChatOpen(!chatOpen);
+                setRosterOpen(false);
+                setHostToolsOpen(false);
+              }}
+              aria-label="Show chat"
+            >
+              <MessageSquare size={24} />
+              <span>Chat</span>
+            </button>
+            <RoomPopover
+              open={popover === "reactions"}
+              onClose={closePopover}
+              label="Meeting reactions"
+              trigger={
+                <button
+                  className={`toolbar-control ${self.hand_raised || popover === "reactions" ? "toolbar-active" : ""}`}
+                  aria-label="Reactions"
+                  aria-expanded={popover === "reactions"}
+                  onClick={() =>
+                    setPopover(popover === "reactions" ? null : "reactions")
+                  }
+                >
+                  <Heart size={24} />
+                  <span>Reactions</span>
+                </button>
+              }
+            >
+              <div className="reaction-options">
+                {reactions.map((reaction) => (
+                  <button
+                    key={reaction.type}
+                    aria-label={reaction.label}
+                    disabled={conference.connection !== "connected"}
+                    onClick={() => {
+                      if (Date.now() - lastReaction.current < 1000) {
+                        notify("Please wait before reacting again.");
+                        return;
+                      }
+                      if (conference.react(reaction.type))
+                        lastReaction.current = Date.now();
+                      closePopover();
+                    }}
+                  >
+                    {reaction.emoji}
+                  </button>
+                ))}
+              </div>
+              <button
+                disabled={conference.connection !== "connected"}
+                onClick={() => {
+                  conference.raiseHand(!self.hand_raised);
+                  closePopover();
+                }}
+              >
+                <Hand size={18} />
+                {self.hand_raised ? "Lower Hand" : "Raise Hand"}
+              </button>
+            </RoomPopover>
+            <button
               className={`toolbar-control toolbar-share ${screen.sharing ? "toolbar-active" : ""}`}
               disabled={screen.pending || conference.connection !== "connected"}
               onClick={() => {
@@ -770,47 +1091,12 @@ export function MeetingRoom({ code }: { code: string }) {
               <MonitorUp size={24} />
               <span>{screen.sharing ? "Stop Share" : "Share Screen"}</span>
             </button>
-            <button
-              className={`toolbar-control ${rosterOpen ? "toolbar-active" : ""}`}
-              onClick={() => {
-                setRosterOpen(!rosterOpen);
-                setChatOpen(false);
-              }}
-              aria-label="Show participants"
-            >
-              <span className="toolbar-count-icon">
-                <Users size={24} />
-                <small>{conference.participants.length || 1}</small>
-              </span>
-              <span>Participants</span>
-            </button>
-            <button className="toolbar-control" onClick={() => void copy()}>
-              <Link2 size={24} />
-              <span>Invite</span>
-            </button>
-            <button
-              className={`toolbar-control ${chatOpen ? "toolbar-active" : ""}`}
-              onClick={() => {
-                setChatOpen(!chatOpen);
-                setRosterOpen(false);
-              }}
-              aria-label="Show chat"
-            >
-              <MessageSquare size={24} />
-              <span>Chat</span>
-            </button>
-            <button
-              className="toolbar-control toolbar-info"
-              onClick={() => setDetailsOpen(true)}
-            >
-              <Info size={24} />
-              <span>Meeting Info</span>
-            </button>
             {isHost && (
               <button
-                className="toolbar-control host-tools"
+                className={`toolbar-control host-tools ${hostToolsOpen ? "toolbar-active" : ""}`}
                 onClick={() => {
-                  setRosterOpen(true);
+                  setHostToolsOpen(!hostToolsOpen);
+                  setRosterOpen(false);
                   setChatOpen(false);
                 }}
               >
@@ -818,6 +1104,45 @@ export function MeetingRoom({ code }: { code: string }) {
                 <span>Host Tools</span>
               </button>
             )}
+            <RoomPopover
+              open={popover === "more"}
+              onClose={closePopover}
+              label="More meeting controls"
+              trigger={
+                <button
+                  className={`toolbar-control ${popover === "more" ? "toolbar-active" : ""}`}
+                  aria-label="More meeting controls"
+                  aria-expanded={popover === "more"}
+                  onClick={() => setPopover(popover === "more" ? null : "more")}
+                >
+                  <MoreHorizontal size={24} />
+                  <span>More</span>
+                </button>
+              }
+            >
+              <button
+                onClick={() => {
+                  void copy();
+                  closePopover();
+                }}
+              >
+                <Link2 size={16} />
+                Invite
+              </button>
+              <button onClick={() => setPopover("info")}>
+                <Info size={16} />
+                Meeting Info
+              </button>
+              <button
+                onClick={() => {
+                  conference.retryMedia();
+                  closePopover();
+                }}
+                disabled={conference.connection !== "connected"}
+              >
+                Retry media connection
+              </button>
+            </RoomPopover>
           </div>
           <div className="toolbar-end">
             <button

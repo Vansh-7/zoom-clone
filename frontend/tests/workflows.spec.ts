@@ -657,6 +657,9 @@ test("two-person audio/video, mute, leave, removal, and end for all", async ({
         bounds.y + bounds.height <= toolbar.y + toolbar.height,
     ).toBe(true);
   }
+  await host
+    .getByRole("button", { name: "More meeting controls", exact: true })
+    .click();
   await host.getByRole("button", { name: "Invite", exact: true }).click();
   await expect(host.getByRole("status").last()).toContainText("copied");
   await expect

@@ -30,7 +30,10 @@ export interface Participant {
   audio_enabled?: boolean;
   video_enabled?: boolean;
   screen_sharing?: boolean;
+  hand_raised?: boolean;
 }
+export type Reaction =
+  "clap" | "thumbs_up" | "laugh" | "surprised" | "heart" | "celebrate";
 export interface Admission {
   participant: Participant;
   participant_token: string;

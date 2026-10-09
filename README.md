@@ -12,6 +12,7 @@ A Zoom-inspired browser application for instant meetings, scheduling, and meetin
 - Supports up to 4 participants per meeting using mesh-based WebRTC, with real-time audio/video, screen sharing, chat, and host controls.
 - Prejoin camera/microphone selection and media preview; webcam video remains available during screen sharing.
 - Server-authorized host start, mute-all, participant removal, and end-for-everyone controls.
+- Room-scoped reactions and raised hands, gallery and manual speaker views, Hide Self View, and fullscreen.
 - Responsive pages, keyboard navigation, permission messages, separate signaling/media status, diagnostics, and ICE retry.
 
 ## Stack and architecture
@@ -115,7 +116,7 @@ npm.cmd run test:e2e
 
 Start both servers before Playwright. Tests default to ports 3000 and 8000; `E2E_FRONTEND_URL` and `E2E_API_URL` override them. Use a separate SQLite database for browser tests because they create meeting records. Relay tests use configured TURN credentials or `E2E_RTC_CONFIG_FILE`; they skip when neither is available.
 
-Automated verification on October 9, 2026: 109 backend tests and 29 Chrome browser tests passed; three optional performance cases were skipped. An additional four-person relay-only workflow and four local release acceptance checks passed. Coverage includes every media pair, separate webcam/screen tracks, room limits, host controls, ICE recovery, and hosted TURN over UDP, TCP and TLS. Four-person media tests use 360p/15 fps. Ruff, frontend lint, type checking, formatting and production build passed.
+Local verification on October 9, 2026: 117 backend tests, 34 Chrome tests and 12 WebKit tests passed. Three optional performance cases and one WebKit media case were skipped. Ruff, frontend lint, type checking, formatting and production build passed. Chrome coverage includes four-person media at 360p/15 fps, separate webcam/screen tracks, reactions, host controls, ICE recovery, and relay-only UDP/TCP/TLS. Windows WebKit lacks WebRTC/MediaStream; Firefox could not launch because of a Windows runtime configuration error.
 
 Manual verification: the maintainer reported a working four-participant call. Automated browser tests use synthetic media. Independent physical-device, sustained-call, and cross-network relay checks remain necessary.
 
@@ -125,4 +126,5 @@ Manual verification: the maintainer reported a working four-participant call. Au
 - Each participant sends media to every other participant. Four-person calls require more upload bandwidth and device processing than two-person calls. Sustained quality and cross-network compatibility depend on devices, networks, and TURN availability.
 - Host access is stored in the creating browser. Clearing its storage loses that access. A removed guest can return as a new session because account identity is not implemented.
 - Screen sharing depends on browser support. Shared-system audio, recording, and account authentication are not implemented.
+- Remote audio has an Enable Audio prompt when autoplay is blocked. Physical Safari playback still requires device verification.
 - Profile, settings, and contacts are labeled placeholders. Camera/microphone access requires HTTPS or localhost.

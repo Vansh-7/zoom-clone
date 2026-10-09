@@ -338,11 +338,13 @@ for (const viewport of [
           .getByRole("button", { name: "Close participants", exact: true })
           .click();
         await page
-          .locator(".meeting-toolbar")
-          .getByRole("button", { name: "Meeting Info", exact: true })
+          .getByRole("button", { name: "Meeting information", exact: true })
           .click();
         await expect(page.getByRole("dialog")).toBeVisible();
         await page.keyboard.press("Escape");
+        await page
+          .getByRole("button", { name: "More meeting controls", exact: true })
+          .click();
         await page
           .locator(".meeting-toolbar")
           .getByRole("button", { name: "Invite", exact: true })
@@ -352,7 +354,7 @@ for (const viewport of [
         .getByRole("button", { name: "Host Tools", exact: true })
         .click();
       await host
-        .getByRole("button", { name: "Close participants", exact: true })
+        .getByRole("button", { name: "Close host tools", exact: true })
         .click();
       await host.getByRole("button", { name: "End", exact: true }).click();
       await host.keyboard.press("Escape");
@@ -984,7 +986,24 @@ for (const transport of ["udp", "tcp", "tls"] as const)
             page.locator(".video-tile video").evaluateAll((elements) =>
               elements.some((element) => {
                 const video = element as HTMLVideoElement;
-                return !video.muted && video.videoWidth > 0 && !video.paused;
+                return video.muted && video.videoWidth > 0 && !video.paused;
+              }),
+            ),
+          )
+          .toBe(true);
+        await expect
+          .poll(() =>
+            page.locator(".remote-audio audio").evaluateAll((elements) =>
+              elements.some((element) => {
+                const audio = element as HTMLAudioElement;
+                return (
+                  !audio.muted &&
+                  !audio.paused &&
+                  audio.volume === 1 &&
+                  (audio.srcObject as MediaStream | null)
+                    ?.getAudioTracks()
+                    .some((track) => track.readyState === "live")
+                );
               }),
             ),
           )

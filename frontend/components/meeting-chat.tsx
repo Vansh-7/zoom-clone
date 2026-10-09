@@ -19,12 +19,21 @@ export function MeetingChat({
 }) {
   const [draft, setDraft] = useState("");
   const list = useRef<HTMLDivElement>(null);
+  const nearBottom = useRef(true);
+  const [unread, setUnread] = useState(false);
   useEffect(() => {
-    if (list.current) list.current.scrollTop = list.current.scrollHeight;
+    if (!list.current) return;
+    if (nearBottom.current) list.current.scrollTop = list.current.scrollHeight;
+    else {
+      setUnread(true);
+    }
   }, [messages]);
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (send(draft)) setDraft("");
+    if (send(draft)) {
+      nearBottom.current = true;
+      setDraft("");
+    }
   }
   return (
     <aside className="participants-panel chat-panel" aria-label="Meeting chat">
@@ -45,6 +54,12 @@ export function MeetingChat({
         role="log"
         aria-label="Messages"
         aria-live="polite"
+        onScroll={() => {
+          const node = list.current!;
+          nearBottom.current =
+            node.scrollHeight - node.scrollTop - node.clientHeight < 60;
+          if (nearBottom.current) setUnread(false);
+        }}
       >
         {messages.length ? (
           messages.map((message) => (
@@ -76,6 +91,19 @@ export function MeetingChat({
           </div>
         )}
       </div>
+      {unread && (
+        <button
+          className="new-chat-messages"
+          onClick={() => {
+            if (list.current)
+              list.current.scrollTop = list.current.scrollHeight;
+            nearBottom.current = true;
+            setUnread(false);
+          }}
+        >
+          New messages
+        </button>
+      )}
       <form className="chat-compose" onSubmit={submit}>
         <label className="sr-only" htmlFor="chat-message">
           Message everyone

@@ -388,6 +388,9 @@ test("deployed ICE configuration, real two-party RTP, sharing, chat and host con
       "data-state",
       "waiting",
     );
+    await host
+      .getByRole("button", { name: "More meeting controls", exact: true })
+      .click();
     await host.getByRole("button", { name: "Invite", exact: true }).click();
     expect(await host.evaluate(() => navigator.clipboard.readText())).toBe(
       invite,

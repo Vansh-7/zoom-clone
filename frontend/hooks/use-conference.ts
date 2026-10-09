@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, websocketUrl } from "@/lib/api";
 import { errorMessage } from "@/lib/meetings";
 import { mediaFailure, rtcDiagnostics } from "@/lib/rtc-diagnostics";
-import type { Admission, Participant, ChatMessage } from "@/types";
+import type { Admission, Participant, ChatMessage, Reaction } from "@/types";
 
 interface Peer {
   pc: RTCPeerConnection;
@@ -41,6 +41,8 @@ function mediaTracks(stream: MediaStream | null, screen: MediaStream | null) {
 function closePeer(peer: Peer) {
   clearTimeout(peer.timeout);
   peer.pc.close();
+  peer.stream.getTracks().forEach((track) => track.stop());
+  peer.screen.getTracks().forEach((track) => track.stop());
 }
 interface SignalMessage {
   type: string;
@@ -53,6 +55,8 @@ interface SignalMessage {
   message?: string;
   code?: string;
   chat?: ChatMessage;
+  participant_id?: number;
+  reaction?: Reaction;
 }
 
 function candidateMatches(
@@ -92,6 +96,7 @@ export function useConference(
   const muteRef = useRef(onMute);
   const notifyRef = useRef(notify);
   const [participants, setParticipants] = useState<Participant[]>([]);
+  const [reactions, setReactions] = useState<Record<number, Reaction>>({});
   const [remoteStreams, setRemoteStreams] = useState<
     Record<number, MediaStream>
   >({});
@@ -147,6 +152,7 @@ export function useConference(
     let cancelled = false;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
     const peerMap = peers.current;
+    const reactionTimers = new Map<number, ReturnType<typeof setTimeout>>();
     const localId = admission.participant.id;
     const send = (message: object) => {
       const socket = socketRef.current;
@@ -366,12 +372,19 @@ export function useConference(
                 );
                 await offer(participant.id);
               } else if (message.type === "participant-left" && message.id) {
+                clearTimeout(reactionTimers.get(message.id));
+                reactionTimers.delete(message.id);
+                setReactions((current) => {
+                  const next = { ...current };
+                  delete next[message.id!];
+                  return next;
+                });
                 drop(message.id);
                 setParticipants((current) =>
                   current.filter((item) => item.id !== message.id),
                 );
               } else if (
-                message.type === "media-state" &&
+                ["media-state", "hand-state"].includes(message.type) &&
                 message.participant
               ) {
                 const participant = message.participant;
@@ -379,6 +392,28 @@ export function useConference(
                   current.map((item) =>
                     item.id === participant.id ? participant : item,
                   ),
+                );
+              } else if (
+                message.type === "reaction" &&
+                message.participant_id &&
+                message.reaction
+              ) {
+                const id = message.participant_id;
+                clearTimeout(reactionTimers.get(id));
+                setReactions((current) => ({
+                  ...current,
+                  [id]: message.reaction!,
+                }));
+                reactionTimers.set(
+                  id,
+                  setTimeout(() => {
+                    setReactions((current) => {
+                      const next = { ...current };
+                      delete next[id];
+                      return next;
+                    });
+                    reactionTimers.delete(id);
+                  }, 4000),
                 );
               } else if (message.type === "restart-ice" && message.sender) {
                 await offer(message.sender, true);
@@ -501,6 +536,12 @@ export function useConference(
             setRemoteStreams({});
             setRemoteScreenStreams({});
             setPeerStates({});
+            setReactions({});
+            reactionTimers.forEach(clearTimeout);
+            reactionTimers.clear();
+            setParticipants((current) =>
+              current.map((item) => ({ ...item, hand_raised: false })),
+            );
           }
         };
       } catch (error) {
@@ -515,6 +556,7 @@ export function useConference(
       cancelled = true;
       retryRef.current = null;
       clearInterval(heartbeat);
+      reactionTimers.forEach(clearTimeout);
       socketRef.current?.close();
       socketRef.current = null;
       peerMap.forEach(closePeer);
@@ -525,6 +567,15 @@ export function useConference(
   function command(type: "mute-all" | "remove-participant", target?: number) {
     if (socketRef.current?.readyState === WebSocket.OPEN)
       socketRef.current.send(JSON.stringify({ type, target }));
+  }
+  function react(reaction: Reaction) {
+    if (socketRef.current?.readyState !== WebSocket.OPEN) return false;
+    socketRef.current.send(JSON.stringify({ type: "reaction", reaction }));
+    return true;
+  }
+  function raiseHand(raised: boolean) {
+    if (socketRef.current?.readyState === WebSocket.OPEN)
+      socketRef.current.send(JSON.stringify({ type: "hand-state", raised }));
   }
   function retryMedia() {
     setError("");
@@ -573,5 +624,8 @@ export function useConference(
     diagnostics,
     chatMessages,
     sendChat,
+    reactions,
+    react,
+    raiseHand,
   };
 }

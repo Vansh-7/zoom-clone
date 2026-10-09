@@ -4,6 +4,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import timedelta
 
 import anyio
 
@@ -24,6 +25,7 @@ from app.websocket.limits import (
 )
 
 logger = logging.getLogger("uvicorn.error")
+REACTIONS = {"clap", "thumbs_up", "laugh", "surprised", "heart", "celebrate"}
 
 
 @dataclass
@@ -35,6 +37,8 @@ class Connection:
     audio_enabled: bool = False
     video_enabled: bool = False
     screen_sharing: bool = False
+    hand_raised: bool = False
+    reactions: TokenBucket = field(default_factory=lambda: TokenBucket(1, 1))
     last_chat_at: float = 0
     messages: TokenBucket = field(default_factory=lambda: TokenBucket(160, 40))
     controls: TokenBucket = field(default_factory=lambda: TokenBucket(20, 5))
@@ -48,6 +52,7 @@ class Connection:
             "audio_enabled": self.audio_enabled,
             "video_enabled": self.video_enabled,
             "screen_sharing": self.screen_sharing,
+            "hand_raised": self.hand_raised,
         }
 
     async def send(self, message: dict):
@@ -282,6 +287,8 @@ class RoomManager:
                         "restart-ice",
                         "media-state",
                         "chat",
+                        "reaction",
+                        "hand-state",
                         "mute-all",
                         "remove-participant",
                     ):
@@ -349,6 +356,42 @@ class RoomManager:
                         await self.broadcast(
                             code,
                             {"type": "media-state", "participant": connection.public()},
+                        )
+                    elif kind == "reaction":
+                        reaction = message.get("reaction")
+                        if not isinstance(reaction, str) or reaction not in REACTIONS:
+                            raise AppError(
+                                422, "INVALID_REACTION", "Choose a supported reaction."
+                            )
+                        if not connection.reactions.take():
+                            raise AppError(
+                                429,
+                                "REACTION_RATE_LIMIT",
+                                "Please wait before reacting again.",
+                            )
+                        await self.broadcast(
+                            code,
+                            {
+                                "type": "reaction",
+                                "participant_id": connection.id,
+                                "reaction": reaction,
+                                "id": uuid.uuid4().hex,
+                                "expires_at": (
+                                    utcnow() + timedelta(seconds=4)
+                                ).isoformat(),
+                            },
+                        )
+                    elif kind == "hand-state":
+                        if type(message.get("raised")) is not bool:
+                            raise AppError(
+                                422,
+                                "INVALID_HAND_STATE",
+                                "Raised hand must use a boolean.",
+                            )
+                        connection.hand_raised = message["raised"]
+                        await self.broadcast(
+                            code,
+                            {"type": "hand-state", "participant": connection.public()},
                         )
                     elif kind == "chat":
                         text = message.get("text")
