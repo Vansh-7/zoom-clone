@@ -209,7 +209,7 @@ async function sample(pages: Page[], phase: string, cpu: CDPSession) {
 test.describe("isolated four-person measurements", () => {
   test.skip(
     process.env.E2E_MESH_PERFORMANCE !== "1",
-    "Opt in on a separate four-person test backend; production remains at two.",
+    "Opt in on a separate four-person test backend.",
   );
   for (const mode of ["720p30", "360p15", "adaptive"] as const) {
     test(`${mode}: capture quality and recovery`, async ({

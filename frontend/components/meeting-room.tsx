@@ -625,7 +625,7 @@ export function MeetingRoom({ code }: { code: string }) {
               </div>
             ) : (
               <div
-                className={`video-grid ${others.length === 0 ? "video-grid-solo" : ""}`}
+                className={`video-grid ${others.length === 0 ? "video-grid-solo" : others.length >= 2 ? "video-grid-gallery" : ""}`}
               >
                 {cameras}
               </div>

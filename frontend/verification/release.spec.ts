@@ -395,7 +395,7 @@ test("deployed ICE configuration, real two-party RTP, sharing, chat and host con
     await enter(guest, invite, "Release guest");
     for (const page of [host, guest]) await media(page);
     const rtc = await (await request.get(`${API}/api/rtc-config`)).json();
-    expect(rtc.max_participants).toBe(2);
+    expect(rtc.max_participants).toBe(4);
     const configurationMatches = await host.evaluate((rtc) => {
       const pc = (window as unknown as { __release: Probe }).__release.peers[0];
       const normalize = (servers: RTCIceServer[]) =>

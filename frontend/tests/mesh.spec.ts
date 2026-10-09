@@ -360,6 +360,93 @@ async function released(page: Page) {
     .toBe(true);
 }
 
+async function fourPersonLayout(page: Page, sharing: boolean, host: boolean) {
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 768, height: 1024 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await expect(page.locator(".camera-tile")).toHaveCount(4);
+    await expect(page.locator(".screen-tile")).toHaveCount(sharing ? 1 : 0);
+    expect(
+      await page.locator(".camera-tile, .screen-tile").evaluateAll((tiles) => {
+        const stage = document
+          .querySelector(".meeting-stage")!
+          .getBoundingClientRect();
+        return tiles.every((tile) => {
+          const rect = tile.getBoundingClientRect();
+          return (
+            rect.width >= 70 &&
+            rect.height >= 40 &&
+            rect.left >= stage.left &&
+            rect.top >= stage.top &&
+            rect.right <= stage.right + 1 &&
+            rect.bottom <= stage.bottom + 1
+          );
+        });
+      }),
+    ).toBe(true);
+    if (!sharing && viewport.width >= 701)
+      expect(
+        await page.locator(".camera-tile").evaluateAll((tiles) => {
+          const bounds = tiles.map((tile) => tile.getBoundingClientRect());
+          return bounds[2].top - bounds[0].bottom;
+        }),
+      ).toBeLessThanOrEqual(12);
+    const toolbar = async () => {
+      const controls = page.locator(".meeting-toolbar button");
+      await expect(controls).toHaveCount(host ? 9 : 8);
+      for (const button of await controls.all()) {
+        await expect(button).toBeEnabled();
+        expect(
+          await button.evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            const hit = document.elementFromPoint(
+              rect.x + rect.width / 2,
+              rect.y + rect.height / 2,
+            );
+            return (
+              rect.width >= 38 &&
+              rect.height >= 44 &&
+              rect.left >= 0 &&
+              rect.top >= 0 &&
+              rect.right <= innerWidth &&
+              rect.bottom <= innerHeight &&
+              !!hit &&
+              element.contains(hit)
+            );
+          }),
+        ).toBe(true);
+        await button.click({ trial: true });
+      }
+    };
+    await toolbar();
+    await page.screenshot({
+      path: `../artifacts/four-${sharing ? "sharing" : "gallery"}-${viewport.width}.png`,
+    });
+    await page
+      .getByRole("button", { name: "Show participants", exact: true })
+      .click();
+    for (let index = 0; index < 4; index++)
+      await expect(
+        page.locator(".participant-row").filter({ hasText: `Mesh ${index}` }),
+      ).toBeVisible();
+    await toolbar();
+    await page.getByRole("button", { name: "Show chat", exact: true }).click();
+    await toolbar();
+    await page.getByRole("button", { name: "Close chat", exact: true }).click();
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollHeight <= innerHeight &&
+          document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+}
+
 test("four peers recover simultaneous failed host pairs while guest media continues", async ({
   browser,
   request,
@@ -542,7 +629,7 @@ for (const count of [3, 4]) {
     const config = await (await request.get(`${API}/api/rtc-config`)).json();
     test.skip(
       config.max_participants < count,
-      `Requires a dedicated backend with MAX_PARTICIPANTS>=${count}; production remains at two.`,
+      `Requires a backend with MAX_PARTICIPANTS>=${count}.`,
     );
     const created = await (
       await request.post(`${API}/api/meetings/instant`)
@@ -610,7 +697,31 @@ for (const count of [3, 4]) {
         });
         expect(full.status()).toBe(409);
         expect((await full.json()).error.code).toBe("MEETING_FULL");
+        const overflow = await browser.newContext();
+        try {
+          const page = await overflow.newPage();
+          await instrument(page);
+          await page.goto(`${FRONTEND}/meeting/${code}`);
+          await page
+            .getByLabel("Your name", { exact: true })
+            .fill("Fifth guest");
+          await page
+            .getByRole("button", { name: "Join Meeting", exact: true })
+            .click();
+          await expect(
+            page.locator(".error-notice[role='alert']"),
+          ).toContainText("The room is full.");
+          expect(
+            await page.evaluate(() => ({
+              peers: window.__mesh.peers.length,
+              sockets: window.__mesh.sockets.length,
+            })),
+          ).toEqual({ peers: 0, sockets: 0 });
+        } finally {
+          await overflow.close();
+        }
       }
+      if (count === 4) await fourPersonLayout(host, false, true);
       // Restarts requested concurrently from both sides must retain one offer owner per pair.
       const beforeRestart = await Promise.all(pages.map(stats));
       await Promise.all(
@@ -850,6 +961,18 @@ for (const count of [3, 4]) {
         cameraIds.map((pair) => pair.audio),
       );
       await growing(pages);
+      if (count === 4) {
+        await host
+          .getByRole("button", { name: "Close participants", exact: true })
+          .click();
+        await guests[0]
+          .getByRole("button", { name: "Close chat", exact: true })
+          .click();
+        await fourPersonLayout(guests[0], true, false);
+        await host
+          .getByRole("button", { name: "Show participants", exact: true })
+          .click();
+      }
       await host
         .getByRole("button", { name: "Stop sharing screen", exact: true })
         .click();

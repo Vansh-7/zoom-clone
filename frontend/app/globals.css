@@ -2264,6 +2264,11 @@ select {
   flex: 1;
   grid-template-rows: minmax(0, 1fr);
 }
+@media (min-width: 701px) {
+  .video-grid-gallery {
+    grid-auto-rows: minmax(0, auto);
+  }
+}
 .video-tile {
   aspect-ratio: 16/9;
   min-height: 0;
