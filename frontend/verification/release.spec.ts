@@ -434,7 +434,7 @@ test("deployed ICE configuration, real two-party RTP, sharing, chat and host con
       });
     }
     await guest.setViewportSize({ width: 1440, height: 900 });
-    // Synthetic chosen screen source, with real WebRTC track replacement and decoding.
+    // Animate the synthetic screen so frames continue after the sender attaches it.
     await host.evaluate(() => {
       navigator.mediaDevices.getDisplayMedia = async () => {
         const canvas = document.createElement("canvas");
@@ -447,6 +447,15 @@ test("deployed ICE configuration, real two-party RTP, sharing, chat and host con
         (window as unknown as { __release: Probe }).__release.streams.push(
           stream,
         );
+        const track = stream.getVideoTracks()[0];
+        let frame = 0;
+        const paint = () => {
+          if (track.readyState !== "live") return;
+          context.fillStyle = frame++ % 2 ? "white" : "black";
+          context.fillRect(100, 100, 20, 20);
+          requestAnimationFrame(paint);
+        };
+        paint();
         return stream;
       };
     });

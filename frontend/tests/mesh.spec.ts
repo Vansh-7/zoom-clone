@@ -8,6 +8,7 @@ interface Probe {
   peers: RTCPeerConnection[];
   streams: MediaStream[];
   sockets: WebSocket[];
+  socketCloseCodes: number[];
   selfId?: number;
   errors: string[];
   signals: { type: string; sender?: number; target?: number; ufrag?: string }[];
@@ -27,6 +28,7 @@ async function instrument(page: Page) {
       peers: [],
       streams: [],
       sockets: [],
+      socketCloseCodes: [],
       errors: [],
       signals: [],
     };
@@ -76,6 +78,9 @@ async function instrument(page: Page) {
       constructor(url: string | URL, protocols?: string | string[]) {
         super(url, protocols);
         window.__mesh.sockets.push(this);
+        this.addEventListener("close", (event) => {
+          window.__mesh.socketCloseCodes.push(event.code);
+        });
         this.addEventListener("message", (event) => {
           const message = JSON.parse(event.data);
           if (message.type === "welcome")
@@ -1037,6 +1042,9 @@ for (const count of [3, 4]) {
               url: page.url(),
               peers: await stats(page),
               errors: await page.evaluate(() => window.__mesh.errors),
+              socketCloseCodes: await page.evaluate(
+                () => window.__mesh.socketCloseCodes,
+              ),
               signals: await page.evaluate(() => window.__mesh.signals),
               notice: await page.locator(".room-error").allTextContents(),
             })),
