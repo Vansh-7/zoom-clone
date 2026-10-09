@@ -19,6 +19,7 @@ import {
   Hand,
   MoreHorizontal,
   Expand,
+  Shrink,
   Info,
   Link2,
   LockKeyhole,
@@ -203,14 +204,40 @@ export function MeetingRoom({ code }: { code: string }) {
   const [hideSelf, setHideSelf] = useState(false);
   const [speakerId, setSpeakerId] = useState<number | null>(null);
   const [hostToolsOpen, setHostToolsOpen] = useState(false);
+  const meetingRoot = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fullscreenError, setFullscreenError] = useState("");
   const lastReaction = useRef(0);
   const closePopover = useCallback(() => setPopover(null), []);
-  function fullscreen() {
-    if (document.fullscreenElement) void document.exitFullscreen();
-    else
-      void document.documentElement
-        .requestFullscreen()
-        .catch(() => notify("Full screen isn't available in this browser."));
+  useEffect(() => {
+    const syncFullscreen = () =>
+      setIsFullscreen(
+        !!meetingRoot.current &&
+          document.fullscreenElement === meetingRoot.current,
+      );
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    return () =>
+      document.removeEventListener("fullscreenchange", syncFullscreen);
+  }, []);
+  async function fullscreen() {
+    const room = meetingRoot.current;
+    if (!room) return;
+    setFullscreenError("");
+    try {
+      if (document.fullscreenElement === room) {
+        await document.exitFullscreen();
+      } else if (
+        typeof room.requestFullscreen === "function" &&
+        document.fullscreenEnabled
+      ) {
+        // Keep the request in the click handler's user gesture.
+        await room.requestFullscreen();
+      } else {
+        setFullscreenError("Fullscreen isn't available in this browser.");
+      }
+    } catch {
+      setFullscreenError("Fullscreen was blocked. Please try again.");
+    }
   }
   const media = useLocalMedia();
   const screen = useScreenShare();
@@ -584,7 +611,7 @@ export function MeetingRoom({ code }: { code: string }) {
         setConfirmEnd(true);
       }}
     >
-      <div className="meeting-room">
+      <div className="meeting-room" ref={meetingRoot}>
         <header className="room-header">
           <div className="room-topic">
             <ShieldCheck size={17} />
@@ -705,26 +732,25 @@ export function MeetingRoom({ code }: { code: string }) {
               </button>
               <button
                 onClick={() => {
-                  fullscreen();
+                  void fullscreen();
                   closePopover();
                 }}
               >
-                Fullscreen <Expand size={16} />
+                {isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+                {isFullscreen ? <Shrink size={16} /> : <Expand size={16} />}
               </button>
             </RoomPopover>
-            <button
-              className="room-view-button"
-              onClick={fullscreen}
-              aria-label="Toggle full screen"
-            >
-              <Expand size={15} />
-              <span>Full screen</span>
-            </button>
           </div>
         </header>
         <div className="room-content">
           <main className="meeting-stage">
             <RemoteAudio streams={conference.remoteStreams} />
+            {fullscreenError && (
+              <div className="room-error" role="alert">
+                <span>{fullscreenError}</span>
+                <button onClick={() => setFullscreenError("")}>Dismiss</button>
+              </div>
+            )}
             {screen.sharing && (
               <div className="sharing-banner" role="status">
                 <MonitorUp size={16} /> You are sharing your screen

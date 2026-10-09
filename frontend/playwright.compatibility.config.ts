@@ -9,8 +9,9 @@ export default defineConfig({
     "meeting-playback.spec.ts",
     "meeting-ui.spec.ts",
     "private-chat.spec.ts",
+    "meeting-fullscreen.spec.ts",
   ],
-  grep: /scheduled meeting downloads|workflow availability|dashboard, join|responsive pages|scheduling uses|backend unavailable|Start Meeting claims|guest waits|permission denial|meeting gallery|remote audio|original favicon|chat preserves reading|meeting popovers|private chat/,
+  grep: /scheduled meeting downloads|workflow availability|dashboard, join|responsive pages|scheduling uses|backend unavailable|Start Meeting claims|guest waits|permission denial|meeting gallery|remote audio|original favicon|chat preserves reading|meeting popovers|private chat|fullscreen/,
   use: {
     ...base.use,
     channel: undefined,

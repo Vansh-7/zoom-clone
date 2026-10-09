@@ -1,3 +1,4 @@
+import { toggleMeetingFullscreen } from "./helpers/fullscreen";
 import { test, expect, type Page } from "@playwright/test";
 
 const API = process.env.E2E_API_URL ?? "http://127.0.0.1:8000";
@@ -219,7 +220,8 @@ test("four participants synchronize reactions, raised hands, speaker view and se
   browser,
   request,
 }) => {
-  test.setTimeout(120000);
+  // This walkthrough exercises every responsive view with twelve live media pairs.
+  test.setTimeout(240000);
   const created = await (
     await request.post(`${API}/api/meetings/instant`)
   ).json();
@@ -467,14 +469,24 @@ test("four participants synchronize reactions, raised hands, speaker view and se
           .getByRole("button", { name: "Fullscreen", exact: true })
           .click();
         await expect
-          .poll(() => host.evaluate(() => !!document.fullscreenElement))
+          .poll(() =>
+            host.evaluate(
+              () =>
+                document.fullscreenElement ===
+                document.querySelector(".meeting-room"),
+            ),
+          )
           .toBe(true);
         await toolbarBounds(host);
-        await host
-          .getByRole("button", { name: "Toggle full screen", exact: true })
-          .click();
+        await toggleMeetingFullscreen(host, false);
         await expect
-          .poll(() => host.evaluate(() => !!document.fullscreenElement))
+          .poll(() =>
+            host.evaluate(
+              () =>
+                document.fullscreenElement ===
+                document.querySelector(".meeting-room"),
+            ),
+          )
           .toBe(false);
       }
     }

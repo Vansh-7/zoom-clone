@@ -1,4 +1,8 @@
 import {
+  fullscreenBounds,
+  toggleMeetingFullscreen,
+} from "./helpers/fullscreen";
+import {
   test,
   expect,
   type Browser,
@@ -285,6 +289,7 @@ for (const viewport of [
     browser,
     request,
   }) => {
+    test.setTimeout(180000);
     const room = await pair(browser, request, { ice_servers: [] });
     try {
       const { host, guest } = room;
@@ -358,18 +363,101 @@ for (const viewport of [
         .click();
       await host.getByRole("button", { name: "End", exact: true }).click();
       await host.keyboard.press("Escape");
-      await host
-        .getByRole("button", { name: "Toggle full screen", exact: true })
-        .click();
+      const continuity = await host.evaluateHandle(() => {
+        const probe = window as unknown as Window & {
+          __testPeers: RTCPeerConnection[];
+          __testSocket: WebSocket;
+        };
+        return {
+          root: document.querySelector(".meeting-room"),
+          socket: probe.__testSocket,
+          peers: [...probe.__testPeers],
+          tracks: probe.__testPeers.flatMap((peer) =>
+            peer.getSenders().map((sender) => sender.track),
+          ),
+          videos: Array.from(document.querySelectorAll("video"), (element) => ({
+            element,
+            stream: element.srcObject,
+          })),
+        };
+      });
+      const fullscreenBefore = await received(guest);
+      await toggleMeetingFullscreen(host, true);
       await expect
-        .poll(() => host.evaluate(() => !!document.fullscreenElement))
+        .poll(() =>
+          host.evaluate(
+            () =>
+              document.fullscreenElement ===
+              document.querySelector(".meeting-room"),
+          ),
+        )
         .toBe(true);
       await toolbarInViewport(host);
-      await host
-        .getByRole("button", { name: "Toggle full screen", exact: true })
-        .click();
+      await fullscreenBounds(host);
+      for (const panel of ["participants", "chat"]) {
+        await host
+          .getByRole("button", { name: `Show ${panel}`, exact: true })
+          .click();
+        await fullscreenBounds(host);
+        await host
+          .getByRole("button", { name: `Close ${panel}`, exact: true })
+          .click();
+      }
+      await host.screenshot({
+        path: `../artifacts/fullscreen-sharing-${viewport.width}.png`,
+      });
       await expect
-        .poll(() => host.evaluate(() => !!document.fullscreenElement))
+        .poll(async () => {
+          const after = await received(guest);
+          return (
+            after.camera > fullscreenBefore.camera &&
+            after.screen > fullscreenBefore.screen &&
+            after.audio > fullscreenBefore.audio
+          );
+        })
+        .toBe(true);
+      await toggleMeetingFullscreen(host, false);
+      expect(
+        await continuity.evaluate((before) => {
+          const probe = window as unknown as Window & {
+            __testPeers: RTCPeerConnection[];
+            __testSocket: WebSocket;
+          };
+          const tracks = probe.__testPeers.flatMap((peer) =>
+            peer.getSenders().map((sender) => sender.track),
+          );
+          return (
+            before.root === document.querySelector(".meeting-room") &&
+            before.socket === probe.__testSocket &&
+            probe.__testSocket.readyState === WebSocket.OPEN &&
+            before.peers.length === probe.__testPeers.length &&
+            before.peers.every(
+              (peer, index) =>
+                peer === probe.__testPeers[index] &&
+                peer.connectionState === "connected",
+            ) &&
+            before.tracks.length === tracks.length &&
+            before.tracks.every(
+              (track, index) =>
+                track === tracks[index] &&
+                (!track || track.readyState === "live"),
+            ) &&
+            before.videos.every(
+              ({ element, stream }) =>
+                element.isConnected && element.srcObject === stream,
+            )
+          );
+        }),
+      ).toBe(true);
+      await continuity.dispose();
+      await expect
+        .poll(() =>
+          host.evaluate(
+            () =>
+              document.fullscreenElement ===
+              document.querySelector(".meeting-room"),
+          ),
+        )
         .toBe(false);
       // A browser's sharing banner reduces viewport height. Intrinsic screen
       // dimensions must not push the stage over the anchored toolbar.

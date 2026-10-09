@@ -1,3 +1,4 @@
+import { toggleMeetingFullscreen } from "./helpers/fullscreen";
 import { test, expect, type Page } from "@playwright/test";
 
 const API = process.env.E2E_API_URL ?? "http://127.0.0.1:8000";
@@ -175,16 +176,18 @@ test("meeting gallery fits its allocated canvas with 1-4 participants, panels an
       }
     }
     if (browserName === "chromium") {
-      await host
-        .getByRole("button", { name: "Toggle full screen", exact: true })
-        .click();
+      await toggleMeetingFullscreen(host, true);
       await expect
-        .poll(() => host.evaluate(() => !!document.fullscreenElement))
+        .poll(() =>
+          host.evaluate(
+            () =>
+              document.fullscreenElement ===
+              document.querySelector(".meeting-room"),
+          ),
+        )
         .toBe(true);
       await galleryBounds(host, 4);
-      await host
-        .getByRole("button", { name: "Toggle full screen", exact: true })
-        .click();
+      await toggleMeetingFullscreen(host, false);
     }
   } finally {
     await request.post(`${API}/api/meetings/${code}/end`, {
