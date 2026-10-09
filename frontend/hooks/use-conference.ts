@@ -123,10 +123,20 @@ export function useConference(
       if (socket?.readyState === WebSocket.OPEN)
         socket.send(JSON.stringify(message));
     };
+    const clearRecoveredError = () => {
+      // A healthy pair must not hide another participant's failed connection.
+      if (
+        [...peerMap.values()].every(
+          ({ pc }) => pc.connectionState === "connected",
+        )
+      )
+        setError("");
+    };
     const drop = (id: number) => {
       const peer = peerMap.get(id);
       if (peer) closePeer(peer);
       peerMap.delete(id);
+      clearRecoveredError();
       setRemoteStreams((current) => {
         const next = { ...current };
         delete next[id];
@@ -230,7 +240,7 @@ export function useConference(
                 });
               } else if (pc.connectionState === "connected") {
                 clearTimeout(peer.timeout);
-                setError("");
+                clearRecoveredError();
               }
             }
           };
