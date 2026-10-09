@@ -11,6 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
 from app.api.routes import router, ws_router
+from app.api.rate_limit import RestRateLimiter, RestRateLimitMiddleware
 from app.config import get_settings
 from app.database import Base, SessionLocal, engine, utcnow
 from app.models import Meeting, MeetingParticipant
@@ -79,6 +80,8 @@ app = FastAPI(
     lifespan=lifespan,
     description="SQLite-backed meetings and small-room WebRTC signaling. No account login is required.",
 )
+app.state.rest_limiter = RestRateLimiter()
+app.add_middleware(RestRateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().allowed_origins,

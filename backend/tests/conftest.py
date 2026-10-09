@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.database import Base, engine
 from app.main import app
+from app.api.rate_limit import RestRateLimiter
 from app.websocket.limits import ConnectionGate
 from app.websocket.manager import manager
 
@@ -21,5 +22,6 @@ from app.websocket.manager import manager
 def client(monkeypatch):
     Base.metadata.drop_all(engine)
     monkeypatch.setattr(manager, "gate", ConnectionGate())
+    monkeypatch.setattr(app.state, "rest_limiter", RestRateLimiter())
     with TestClient(app) as test_client:
         yield test_client
