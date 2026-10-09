@@ -9,7 +9,8 @@ A Zoom-inspired browser application for instant meetings, scheduling, and meetin
 - Home dashboard and split-view meeting manager with upcoming and previous meetings from SQLite.
 - Instant meetings with unique 11-digit IDs, shareable invitations, and joining by ID or link.
 - Scheduling with local date/time, timezone display, duration, and downloadable calendar invitations.
-- Two-person audio/video, prejoin camera/microphone selection, media preview, screen sharing, and meeting chat.
+- Supports up to 4 participants per meeting using mesh-based WebRTC, with real-time audio/video, screen sharing, chat, and host controls.
+- Prejoin camera/microphone selection and media preview; webcam video remains available during screen sharing.
 - Server-authorized host start, mute-all, participant removal, and end-for-everyone controls.
 - Responsive pages, keyboard navigation, permission messages, separate signaling/media status, diagnostics, and ICE retry.
 
@@ -78,16 +79,16 @@ Use [backend/.env.example](backend/.env.example) and [frontend/.env.example](fro
 | `FRONTEND_URL`             | Public frontend origin used in invitation links.                        |
 | `CORS_ORIGINS`             | Comma-separated allowed browser origins, also checked for WebSockets.   |
 | `SEED_DATA`                | Enable repeatable sample data and future sample replenishment.          |
-| `MAX_PARTICIPANTS`         | Room capacity; default `2`.                                             |
+| `MAX_PARTICIPANTS`         | Room capacity; default `4`.                                             |
 | `DISCONNECT_GRACE_SECONDS` | Host disconnect grace period; default `30`.                             |
 | `ICE_SERVERS_JSON`         | JSON array of STUN/TURN server definitions.                             |
 | `ICE_TRANSPORT_POLICY`     | `all` normally; `relay` for relay-only verification.                    |
 | `TRUSTED_PROXY_CIDRS`      | Confirmed proxy peers allowed to supply client identity; empty locally. |
 
-1. **Railway:** use `backend` as the root directory and its Dockerfile. Mount a persistent volume at `/data`, set `DATABASE_URL=sqlite:////data/zoom.db`, and configure `/api/health` as the health check. Keep one worker and one replica. The startup script reads Railway's `PORT` and enforces WebSocket transport limits.
+1. **Railway:** use `backend` as the root directory and its Dockerfile. Mount a persistent volume at `/data`, set `DATABASE_URL=sqlite:////data/zoom.db` and `MAX_PARTICIPANTS=4`, and configure `/api/health` as the health check. Keep one worker and one replica. The startup script reads Railway's `PORT` and enforces WebSocket transport limits.
 2. Set `FRONTEND_URL` and `CORS_ORIGINS` to the exact HTTPS frontend origin. Preserve the volume and existing variables when updating the service. Check volume permissions before changing the runtime user.
 3. **Vercel:** use `frontend` as the root directory, the Next.js preset, Node.js 22, and `NEXT_PUBLIC_API_BASE_URL=https://zoom-clone-api.up.railway.app`. Keep the stable production domain public for evaluators.
-4. Verify backend health, direct invitations, scheduling, and two-person media after deployment. HTTPS API configuration produces WSS signaling URLs. Coordinate backend restarts because active calls are interrupted; SQLite data remains on the volume.
+4. Verify backend health, direct invitations, scheduling, four-person media, and fifth-participant rejection after deployment. HTTPS API configuration produces WSS signaling URLs. Coordinate backend restarts because active calls are interrupted; SQLite data remains on the volume.
 
 Some networks require TURN. Configure provider-issued credentials in Railway's `ICE_SERVERS_JSON`, then redeploy the backend. This variable accepts a strict JSON array, not a JavaScript snippet or an `iceServers` wrapper. TURN entries require `urls`, `username`, and `credential`. Include the provider's UDP, TCP and TLS URLs, and keep `ICE_TRANSPORT_POLICY=all` for normal operation. Cross-network connectivity still requires testing on real devices.
 
@@ -114,12 +115,14 @@ npm.cmd run test:e2e
 
 Start both servers before Playwright. Tests default to ports 3000 and 8000; `E2E_FRONTEND_URL` and `E2E_API_URL` override them. Use a separate SQLite database for browser tests because they create meeting records. Relay tests use configured TURN credentials or `E2E_RTC_CONFIG_FILE`; they skip when neither is available.
 
-Verified on October 9, 2026: 104 backend tests, four production acceptance checks, and six RTC checks passed with synthetic Chrome media. The RTC checks include separate hosted TURN tests over UDP, TCP and TLS. Ruff, frontend lint, type checking, formatting and production build passed. Physical-device and cross-network media verification remains pending.
+Automated verification on October 9, 2026: 109 backend tests and 29 Chrome browser tests passed; three optional performance cases were skipped. An additional four-person relay-only workflow and four local release acceptance checks passed. Coverage includes every media pair, separate webcam/screen tracks, room limits, host controls, ICE recovery, and hosted TURN over UDP, TCP and TLS. Four-person media tests use 360p/15 fps. Ruff, frontend lint, type checking, formatting and production build passed.
+
+Manual verification: the maintainer reported a working four-participant call. Automated browser tests use synthetic media. Independent physical-device, sustained-call, and cross-network relay checks remain necessary.
 
 ## Limitations
 
 - Signaling, chat history, and rate limits are process-local. Run one backend worker and replica with persistent SQLite storage.
-- Rooms default to two participants. Four-person capacity is verified locally with synthetic media; four-device hosted relay and cross-network checks are still required before increasing the production limit.
+- Each participant sends media to every other participant. Four-person calls require more upload bandwidth and device processing than two-person calls. Sustained quality and cross-network compatibility depend on devices, networks, and TURN availability.
 - Host access is stored in the creating browser. Clearing its storage loses that access. A removed guest can return as a new session because account identity is not implemented.
 - Screen sharing depends on browser support. Shared-system audio, recording, and account authentication are not implemented.
 - Profile, settings, and contacts are labeled placeholders. Camera/microphone access requires HTTPS or localhost.
