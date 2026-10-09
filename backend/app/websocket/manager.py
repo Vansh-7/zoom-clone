@@ -345,7 +345,7 @@ class RoomManager:
                             raise ValueError("Screen sharing state must use a boolean")
                         connection.audio_enabled = message["audio_enabled"]
                         connection.video_enabled = message["video_enabled"]
-                        connection.screen_sharing = sharing and connection.video_enabled
+                        connection.screen_sharing = sharing
                         await self.broadcast(
                             code,
                             {"type": "media-state", "participant": connection.public()},

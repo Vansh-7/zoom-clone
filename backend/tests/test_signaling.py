@@ -167,6 +167,36 @@ def test_signaling_roster_host_controls_and_revocation(client):
         assert ws.receive_json()["code"] == "INVALID_SESSION"
 
 
+@pytest.mark.parametrize(
+    "camera,sharing", [(True, True), (False, True), (False, False)]
+)
+def test_camera_and_screen_state_are_independent(client, camera, sharing):
+    created = create(client)
+    code = created["meeting"]["meeting_code"]
+    host = admit(client, created, "Presenter", True)
+    guest = admit(client, created, "Viewer")
+    with client.websocket_connect(f"/ws/meetings/{code}", headers=ORIGIN) as presenter:
+        connect(presenter, host)
+        presenter.send_json(
+            {
+                "type": "media-state",
+                "audio_enabled": True,
+                "video_enabled": camera,
+                "screen_sharing": sharing,
+            }
+        )
+        state = presenter.receive_json()["participant"]
+        assert state["video_enabled"] is camera
+        assert state["screen_sharing"] is sharing
+        assert state["audio_enabled"] is True
+        with client.websocket_connect(f"/ws/meetings/{code}", headers=ORIGIN) as viewer:
+            roster = connect(viewer, guest)["participants"]
+            assert (
+                next(item for item in roster if item["id"] == host["participant"]["id"])
+                == state
+            )
+
+
 def test_rest_leave_closes_signaling_before_browser_navigation(client):
     created = create(client)
     code = created["meeting"]["meeting_code"]
