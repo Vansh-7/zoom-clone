@@ -1,72 +1,77 @@
-# Reliability and release checks
+# Release verification
 
-## Deployment audit
+Verified on October 9, 2026. Application release: `c7edd7e3bfa87c4f954cd78e624c3b713daeba51`.
 
-Read-only checks on October 9, 2026 found:
+## Deployment
 
-| Source             | Commit                                     | Status                              |
-| ------------------ | ------------------------------------------ | ----------------------------------- |
-| GitHub `main`      | `d68a3ed015b58135155aa41bda6759f247bacca6` | Current remote source at audit time |
-| Vercel production  | `d68a3ed015b58135155aa41bda6759f247bacca6` | Ready, public application available |
-| Railway production | `53a71a7d08b0682767cb1a041e98908fca79f6a3` | Healthy, behind GitHub              |
+| Platform               | Application commit | Result                                                                      |
+| ---------------------- | ------------------ | --------------------------------------------------------------------------- |
+| GitHub main at release | `c7edd7e`          | [CI passed](https://github.com/Vansh-7/zoom-clone/actions/runs/37894310236) |
+| Vercel production      | `c7edd7e`          | Public frontend responds over HTTPS                                         |
+| Railway production     | `c7edd7e`          | Deployment `a99b8c0c-68b9-47b9-b77f-ae5bb5e91913` succeeded                 |
 
-The existing Railway service has its SQLite volume mounted at `/data`, one replica, and a Dockerfile build rooted at `/backend`. Health was OK; reviewed runtime logs contained no errors. Public RTC configuration advertised two participants, normal ICE policy, and STUN only. No deployment or production configuration change was performed, and no database reset was requested. Local changes require approval before publication or deployment.
+Railway was updated from `53a71a7` after approval. Only its source branch and exact commit were changed. The existing `/data` SQLite volume, variables, domain, Dockerfile builder, health check, one worker, and one replica were preserved. No schema migration, database reset, or service recreation was performed. Capacity remains two.
 
-The deployed calendar download returned HTTP 404, and the old source snapshot lacks the current bounded startup script and REST/WebSocket limit modules. This confirms a real release gap; public health alone does not establish frontend/backend feature compatibility. Updating the existing backend is required before final submission. SQLAlchemy models and database schema are unchanged relative to that deployed source, so this release requires no schema migration.
+Backend health, API documentation, CORS for the public frontend, calendar download, and HTTPS/WSS communication were verified. Startup logs showed one worker. Reviewed logs after acceptance testing and the controlled restart contained no application exceptions or HTTP 5xx responses. The bounded startup script and REST/WebSocket limits are now deployed; production rejected a 65,537-byte WebSocket message with close code `1009`.
 
-## Changes and evidence
+The backend source is pinned to this tested commit. Future releases must explicitly select a newly tested commit. Redeploying an earlier snapshot does not update source. Documentation-only commits can differ from the deployed application commit without changing application behavior.
 
-- Signaling and peer media transport have separate status labels. A connected WebSocket can coexist with failed ICE without a green media indicator. A solo host sees a waiting state. The failure/retry test checks both labels.
-- Prejoin lists camera and microphone inputs through `enumerateDevices`. Selection uses an exact device ID. A successful replacement retains the other input and mute state; a failed replacement leaves the existing input live. Device changes refresh the list. Late capture results are stopped after cancellation, navigation, or meeting termination.
-- Native select controls support keyboard navigation. Browser tests cover replacement failure, permission denial, removed devices, mobile overflow, selected tracks reaching the call, real synthetic RTP, and capture cleanup. Input aliases in the switching fixture represent two choices backed by native synthetic capture; physical hardware selection remains untested.
-- WebKit reproduced topic input being cleared during initial hydration. Scheduling inputs now wait for browser timezone initialization before accepting edits. An unavailable capture API has an explicit message and still allows joining without media.
-- Mobile screenshots exposed two participant tiles collapsing to their placeholder content height. Grid rows now divide the available canvas height. The two-party device test also checks usable tile height at 390 pixels.
-- Trusted proxy identity is explicit and shared by REST limiting and WebSocket admission. Tests reject untrusted, forged, duplicate, and malformed forwarded identity. No new infrastructure or authorization cache was added.
-- The existing offer ownership, serialized signaling, generation-aware ICE queue, restart path, and peer teardown were retained. No new negotiation defect was reproduced. Local direct and UDP/TCP relay tests passed with the updated capture hook.
-- Four-person measurement runs passed twice per profile, with adaptation and ICE recovery tested separately. Browser downscaling limits the interpretation of the 720p results. See [mesh measurements](MESH_VERIFICATION.md).
+## Executed checks
 
-Backend: **104 pytest tests passed**, with nine existing dependency deprecation warnings. Ruff lint and formatting passed. At the two-person limit, **19 Chrome Playwright tests passed**, including two local relay tests; six mesh/performance cases skipped intentionally. Separately, three mesh workflow cases and six performance runs passed at capacity four.
+| Check                                                    | Passed | Failed | Skipped |
+| -------------------------------------------------------- | -----: | -----: | ------: |
+| Local backend pytest                                     |    104 |      0 |       0 |
+| Local default Chrome suite, without relay fixture        |     17 |      0 |       8 |
+| Local UDP/TCP relay checks, temporary coturn fixture     |      2 |      0 |       0 |
+| Local release harness validation                         |      4 |      0 |       0 |
+| Production release harness                               |      4 |      0 |       0 |
+| Additional production navigation/permission/start checks |      3 |      0 |       0 |
+| Production media/admission repeated after restart        |      2 |      0 |       0 |
+| GitHub CI backend                                        |    104 |      0 |       0 |
+| GitHub CI Chrome                                         |     17 |      0 |       8 |
 
-Frontend lint, type checking, formatting, and production build passed. Nine existing workflow checks also passed in Windows Playwright WebKit, covering calendar export, scheduling/timezones, joining, keyboard tabs, 1440/768/390 layouts, backend errors, and no-media admission. This WebKit runtime has no `getUserMedia`; its no-media check verifies the unsupported-API path. It does not verify Safari or WebKit audio/video.
+The default suite's eight skips are six opt-in mesh/performance cases and two relay cases. The two relay cases passed separately locally, giving 19 distinct local regression checks. Seven distinct production browser checks passed; two were repeated after restart. Larger-room experiments were not repeated and production capacity was not increased.
 
-Firefox's nine attempted checks failed before application assertions because its installed test runtime could not launch (`spawn UNKNOWN`; Windows reported a `mozglue` side-by-side assembly error). Firefox compatibility remains unverified. No Windows security setting or application dependency was changed to work around it. Reinstall the pinned browser on a working test machine and rerun:
+Ruff lint and formatting, ESLint, TypeScript, Prettier, and the Next.js production build passed. Backend pytest reported nine dependency deprecation warnings. Initial release-harness runs exposed test-selector, navigation-wait, and browser ICE-normalization mistakes; these were corrected before production testing. No application defect was reproduced, so application code was retained.
+
+## Production evidence
+
+- Instant creation persisted a meeting and returned a valid invitation. Joining worked by formatted ID and direct URL in separate signed-out contexts. Invalid IDs, unrelated URLs, and missing names were rejected.
+- Browser scheduling persisted title, description, local time, timezone, and duration. Refresh retained the record. Downloaded `.ics` start/end timestamps matched UTC and included the invitation URL. Upcoming/Previous views and host-first scheduled admission worked.
+- Both Chrome contexts had increasing inbound/outbound audio/video packet counters, decoded frames, and playing remote video. Peer configuration matched the actual deployed RTC configuration. Selected pairs were direct `host/host/udp`.
+- Camera/microphone controls, native synthetic microphone selection, roster updates, leave/rejoin, refresh, host mute-all/removal/end, guest privilege rejection, and cleanup passed. Removed and invalid sessions could not authenticate.
+- A synthetic canvas selected as the shared-screen source reached the other participant; stopping sharing restored camera video. Chat was delivered in both directions as plain text with participant identity.
+- Deliberately unreachable candidates produced media failure while signaling stayed connected. Diagnostics omitted SDP, addresses, capabilities, and credentials. Restoring candidates and using ICE retry resumed bidirectional media.
+- Back/Forward released capture and sockets before rejoining. Simulated camera/microphone denial allowed no-media admission. Simulated backend downtime showed Offline and recovered. These simulations do not prove physical permission dialogs or real network outages.
+- Home, Meetings, Schedule, Join, and room screenshots were captured at 1440, 768, and 390 pixels. Horizontal overflow, mobile list/detail navigation, native select interaction, and keyboard meeting/tab selection were checked. Desktop Home, tablet Meetings, and the mobile room were visually inspected. This was not a full accessibility certification.
+
+Before the approved controlled restart, all test calls were closed. After restart, the scheduled record retained every response field, and 58 previously saved records retained their codes and stored fields. Health recovered and media/admission checks passed again. Existing records were not removed or overwritten. New test records remain in history; no production cleanup or reset was performed.
+
+Screenshots and sanitized RTP evidence are stored locally in ignored `artifacts/release/`. Traces are disabled in the release configuration because network traces can contain capabilities or TURN credentials.
+
+## Repeat acceptance checks
+
+From `frontend`, after release approval and with both target services available:
 
 ```powershell
-cd frontend
-npx.cmd playwright install firefox webkit
-npm.cmd run test:e2e -- --config playwright.compatibility.config.ts
+$env:E2E_API_URL="https://zoom-clone-api.up.railway.app"
+$env:E2E_FRONTEND_URL="https://zoom-clone-vansh.vercel.app"
+$env:E2E_BROWSER_CHANNEL="chrome"
+npm.cmd run test:e2e -- --config playwright.release.config.ts
+npm.cmd run test:e2e -- tests/workflows.spec.ts --grep "Back and Forward|permission denial|guest waits" --trace off
 ```
 
-Use the same isolated backend and URL overrides as the main suite. [Playwright's browser documentation](https://playwright.dev/docs/browsers) explains the differences between its patched engines and branded Safari/Firefox. The separate config reuses existing workflow tests and removes Chromium-specific capture flags and permissions.
+The release configuration requires explicit URLs. It creates new meetings and does not claim seeded samples, delete records, reset SQLite, or override the deployed ICE configuration. Use an isolated backend for the complete default suite.
 
-A scheduled SQLite record retained its code, title, description, timestamp, duration, status, and invitation across an isolated local backend restart. Production restart persistence remains untested for this release.
+The scheduling check saves `artifacts/release/persistence-before.json`. Close test calls, obtain approval, and restart the existing backend without replacing its volume. Then run:
 
-Prejoin and meeting-room screenshots were captured at 1440, 768, and 390 pixels. The mobile canvas fix was visually inspected, and the README meeting-room screenshot was refreshed from the final local production build.
+```powershell
+node verification/check-persistence.mjs
+npm.cmd run test:e2e -- --config playwright.release.config.ts --grep "deployed ICE|production admission"
+```
 
-## Changed files
+## Remaining checks
 
-| Area                     | Files                                                                                                                                                                                            |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Proxy configuration      | `backend/.env.example`, `backend/app/config.py`, `backend/app/main.py`, `backend/app/server.py`, `backend/app/proxy.py`                                                                          |
-| Backend regression tests | `backend/tests/test_proxy.py`, `backend/tests/test_websocket_transport.py`                                                                                                                       |
-| Media and status UI      | `frontend/hooks/use-local-media.ts`, `frontend/components/meeting-room.tsx`, `frontend/components/device-selectors.tsx`, `frontend/components/connection-status.tsx`, `frontend/app/globals.css` |
-| Hydration guard          | `frontend/components/meeting-forms.tsx`                                                                                                                                                          |
-| Browser verification     | `frontend/tests/devices.spec.ts`, `frontend/tests/rtc.spec.ts`, `frontend/tests/workflows.spec.ts`, `frontend/tests/mesh-performance.spec.ts`, `frontend/playwright.compatibility.config.ts`     |
-| Documentation            | `README.md`, `docs/DEPLOYMENT.md`, `docs/MESH_VERIFICATION.md`, `docs/RELEASE_CHECKS.md`                                                                                                         |
+Production still advertises STUN only. Choose a hosted TURN provider and follow [deployment and TURN procedures](DEPLOYMENT.md). Hosted UDP/TCP/TLS relay, two physical devices on different networks, audible physical microphones, real screen-picker permissions, physical device switching, long sessions, Safari/iOS/Android, and Firefox remain unverified for this release. Local coturn and two contexts on one computer do not establish cross-network reliability.
 
-The refreshed image is `docs/screenshots/meeting-room.png`.
-
-## Publish the tested release
-
-1. Review the local commits and obtain approval before pushing to GitHub. Pushing `main` can trigger Vercel automatically. Run GitHub CI for the exact published commit.
-2. In the existing Railway production service, stage source `Vansh-7/zoom-clone`, branch `main`, root `/backend`, selecting the exact tested commit. Do not redeploy the old deployment's source snapshot. Review changes before applying them.
-3. Preserve the `/data` volume, database path, existing variables, Dockerfile/startup script, health check, one worker/replica, and capacity two. Configure trusted proxy identity only after verifying the edge policy described in [deployment instructions](DEPLOYMENT.md).
-4. Obtain approval to apply the staged backend deployment. Coordinate with active participants because a restart ends calls. Check the deployed commit, health, startup logs, and volume mount afterward.
-5. Confirm Vercel uses the same tested commit, the existing public domain, and its existing HTTPS API origin. Verify direct invitations and WSS signaling between the two releases.
-6. Run the deployment acceptance checklist. Record a scheduled meeting before a backend restart, then retrieve the same code and fields afterward to verify persistence. Local tests do not substitute for this production check.
-
-## Remaining manual checks
-
-Choose a hosted TURN provider and configure issued credentials directly in Railway. Follow the per-transport, relay-only two-device procedure in [deployment instructions](DEPLOYMENT.md), then restore normal ICE policy. Hosted TURN, TLS relay, physical cameras/microphones, cross-network calls, long sessions, real Safari/iOS/Android permissions, and physical input switching remain unverified.
-
-Speaker selection is deferred; output follows browser/system settings. Meeting editing and cancellation are deferred because they are outside the mandatory assignment workflows. Production capacity stays at two until separate physical-device and network verification supports a change.
+Earlier Windows Firefox tests could not launch their installed runtime; earlier WebKit workflow checks did not provide camera/microphone capture. Those results are not claimed as production media verification. Speaker selection remains managed by browser/system settings. Keep capacity two.

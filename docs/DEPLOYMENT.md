@@ -5,7 +5,7 @@ Update the existing Vercel and Railway projects. Do not recreate the backend ser
 ## Release configuration
 
 1. Run the checks in the README and confirm GitHub CI passes for the commit being deployed.
-2. In Railway, select the existing backend service and production environment. Connect `Vansh-7/zoom-clone`, branch `main`, with root directory `/backend`. Redeploying an old deployment can reuse its old source; check the source commit explicitly.
+2. In Railway, select the existing backend service and production environment. Connect `Vansh-7/zoom-clone`, branch `main`, with root directory `/backend`. Stage the exact CI-tested commit and review pending changes before approval and deployment. The current source is pinned to application release `c7edd7e`; explicitly select a new tested commit for future releases. Redeploying an old deployment can reuse its old source.
 3. Preserve the Dockerfile builder, `/data` volume mount, `DATABASE_URL=sqlite:////data/zoom.db`, health check `/api/health`, and one replica. Use the existing startup script, which starts one worker with bounded WebSocket message size and queue length.
 4. Set `FRONTEND_URL=https://zoom-clone-vansh.vercel.app` and `CORS_ORIGINS=https://zoom-clone-vansh.vercel.app`. Add other origins explicitly only when needed. The same allowlist protects WebSocket admission.
 5. Confirm the runtime can write `/data`. Railway documents volume ownership in its [volume guide](https://docs.railway.com/volumes). Existing services may use `RAILWAY_RUN_UID=0` for this reason; preserve a working setting.

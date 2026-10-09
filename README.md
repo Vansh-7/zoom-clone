@@ -112,9 +112,9 @@ npx.cmd playwright install chromium
 npm.cmd run test:e2e
 ```
 
-Start both servers before Playwright. Tests default to ports 3000 and 8000; `E2E_FRONTEND_URL` and `E2E_API_URL` override them. Use a separate SQLite database for browser tests because they create meeting records. Relay tests require `E2E_RTC_CONFIG_FILE`; they skip when no fixture is supplied.
+Start both servers before Playwright. Tests default to ports 3000 and 8000; `E2E_FRONTEND_URL` and `E2E_API_URL` override them. Use a separate SQLite database for browser tests because they create meeting records. Relay tests use configured TURN credentials or `E2E_RTC_CONFIG_FILE`; they skip when neither is available.
 
-Verified on October 9, 2026: 104 backend tests and 19 local Chrome Playwright tests passed, including synthetic bidirectional media, device switching, ICE recovery, sharing, chat, host controls, and local UDP/TCP relay tests. Ruff, frontend lint, type checking, formatting, and production build passed. See [release checks](docs/RELEASE_CHECKS.md) for deployment status and [mesh verification](docs/MESH_VERIFICATION.md) for separate three/four-person measurements. Production remains capped at two.
+Verified on October 9, 2026: 104 backend tests, 19 local Chrome regression checks, and seven production browser checks passed. Ruff, frontend lint, type checking, formatting, build, and GitHub CI passed. Production verification covered meeting workflows, calendar export, synthetic bidirectional media, sharing, chat, host controls, ICE retry, and SQLite persistence after a backend restart. See [release checks](docs/RELEASE_CHECKS.md) for scope and commands. Separate [mesh measurements](docs/MESH_VERIFICATION.md) do not change the production limit of two.
 
 ## Limitations
 

@@ -1,6 +1,6 @@
 # Mesh capacity verification
 
-The production participant limit remains **two**, confirmed through the public backend on October 9, 2026. No production settings, database, deployment, or infrastructure changed during this audit. The public backend currently advertises STUN only.
+The production participant limit remains **two**, confirmed through the public backend on October 9, 2026. The separate mesh experiments below did not change production settings or infrastructure. The public backend advertises STUN only. See [release verification](RELEASE_CHECKS.md) for the subsequent backend deployment and production checks.
 
 ## Implementation and fix
 
