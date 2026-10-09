@@ -114,12 +114,12 @@ npm.cmd run test:e2e
 
 Start both servers before Playwright. Tests default to ports 3000 and 8000; `E2E_FRONTEND_URL` and `E2E_API_URL` override them. Use a separate SQLite database for browser tests because they create meeting records. Relay tests use configured TURN credentials or `E2E_RTC_CONFIG_FILE`; they skip when neither is available.
 
-Verified on October 9, 2026: 104 backend tests, 19 local Chrome regression checks, and seven production browser checks passed. Ruff, frontend lint, type checking, formatting, build, and GitHub CI passed. Production verification covered meeting workflows, calendar export, synthetic bidirectional media, sharing, chat, host controls, ICE retry, and SQLite persistence after a backend restart. Production remains limited to two participants.
+Verified on October 9, 2026: 104 backend tests, 19 local two-person Chrome checks, nine WebKit workflow/layout checks, and four production browser acceptance tests passed. Ruff, frontend lint, type checking, formatting, build, and CI for the audited main commit passed. Isolated four-person mesh, UDP/TCP relay, and quality measurements passed with synthetic media. Production remains limited to two participants. See [conferencing verification and TURN setup](docs/CONFERENCING.md) for evidence, reproduction commands, browser limits, and remaining release gates.
 
 ## Limitations
 
 - Signaling, chat history, and rate limits are process-local. Run one backend worker and replica with persistent SQLite storage.
-- Rooms default to two participants. Physical-device and cross-network media require manual verification; local synthetic-media tests do not prove those conditions.
+- Rooms default to two participants. Four-person capacity is verified locally with synthetic media; hosted TURN, physical-device and cross-network checks are still required before increasing the production limit.
 - Host access is stored in the creating browser. Clearing its storage loses that access. A removed guest can return as a new session because account identity is not implemented.
 - Screen sharing depends on browser support. Shared-system audio, recording, and account authentication are not implemented.
 - Profile, settings, and contacts are labeled placeholders. Camera/microphone access requires HTTPS or localhost.
