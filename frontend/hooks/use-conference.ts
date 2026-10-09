@@ -47,6 +47,7 @@ function closePeer(peer: Peer) {
 interface SignalMessage {
   type: string;
   self_id?: number;
+  capabilities?: string[];
   participants?: Participant[];
   participant?: Participant;
   id?: number;
@@ -108,6 +109,7 @@ export function useConference(
   const [terminal, setTerminal] = useState("");
   const [error, setError] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [privateChatSupported, setPrivateChatSupported] = useState(false);
 
   useEffect(() => {
     muteRef.current = onMute;
@@ -347,6 +349,9 @@ export function useConference(
               const message: SignalMessage = JSON.parse(event.data);
               if (cancelled) return;
               if (message.type === "welcome") {
+                setPrivateChatSupported(
+                  message.capabilities?.includes("private-chat") === true,
+                );
                 setConnection("connected");
                 setParticipants(message.participants ?? []);
                 setError("");
@@ -500,9 +505,12 @@ export function useConference(
                 notifyRef.current(message.message ?? "Done");
               else if (message.type === "error")
                 if (
-                  ["INVALID_CHAT", "CHAT_RATE_LIMIT"].includes(
-                    message.code ?? "",
-                  )
+                  [
+                    "INVALID_CHAT",
+                    "CHAT_RATE_LIMIT",
+                    "INVALID_CHAT_RECIPIENT",
+                    "CHAT_RECIPIENT_UNAVAILABLE",
+                  ].includes(message.code ?? "")
                 )
                   notifyRef.current(
                     message.message ?? "Message could not be sent.",
@@ -527,6 +535,7 @@ export function useConference(
         socket.onclose = () => {
           clearInterval(heartbeat);
           if (!cancelled) {
+            setPrivateChatSupported(false);
             setConnection((current) =>
               current === "ended" ? current : "disconnected",
             );
@@ -585,15 +594,25 @@ export function useConference(
     }
     void retryRef.current?.().catch((error) => setError(errorMessage(error)));
   }
-  function sendChat(text: string) {
+  function sendChat(text: string, recipientId: number | null = null) {
     const socket = socketRef.current;
     if (
       socket?.readyState !== WebSocket.OPEN ||
       !text.trim() ||
-      text.trim().length > 2000
+      text.trim().length > 2000 ||
+      (recipientId !== null &&
+        (!privateChatSupported ||
+          recipientId === admission?.participant.id ||
+          !participants.some((participant) => participant.id === recipientId)))
     )
       return false;
-    socket.send(JSON.stringify({ type: "chat", text: text.trim() }));
+    socket.send(
+      JSON.stringify({
+        type: "chat",
+        text: text.trim(),
+        recipient_id: recipientId,
+      }),
+    );
     return true;
   }
   async function diagnostics() {
@@ -623,6 +642,7 @@ export function useConference(
     retryMedia,
     diagnostics,
     chatMessages,
+    privateChatSupported,
     sendChat,
     reactions,
     react,

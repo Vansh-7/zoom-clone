@@ -8,8 +8,9 @@ export default defineConfig({
     "workflows.spec.ts",
     "meeting-playback.spec.ts",
     "meeting-ui.spec.ts",
+    "private-chat.spec.ts",
   ],
-  grep: /scheduled meeting downloads|workflow availability|dashboard, join|responsive pages|scheduling uses|backend unavailable|Start Meeting claims|guest waits|permission denial|meeting gallery|remote audio|original favicon|chat preserves reading/,
+  grep: /scheduled meeting downloads|workflow availability|dashboard, join|responsive pages|scheduling uses|backend unavailable|Start Meeting claims|guest waits|permission denial|meeting gallery|remote audio|original favicon|chat preserves reading|meeting popovers|private chat/,
   use: {
     ...base.use,
     channel: undefined,

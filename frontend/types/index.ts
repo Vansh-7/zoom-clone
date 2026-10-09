@@ -43,6 +43,8 @@ export interface ChatMessage {
   id: string;
   participant_id: number;
   display_name: string;
+  recipient_id: number | null;
+  recipient_name: string | null;
   text: string;
   sent_at: string;
 }

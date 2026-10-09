@@ -819,9 +819,11 @@ test("meeting chat delivers plain text with names and works on mobile", async ({
     await room.guest
       .getByRole("button", { name: "Show participants", exact: true })
       .click();
-    await expect(room.guest.locator(".participants-heading")).toContainText(
-      "Participants",
-    );
+    await expect(
+      room.guest
+        .getByRole("complementary", { name: "Participants", exact: true })
+        .getByRole("heading"),
+    ).toContainText("Participants");
     await room.guest
       .getByRole("button", { name: "Show chat", exact: true })
       .click();

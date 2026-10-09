@@ -13,6 +13,7 @@ import {
   ArrowLeft,
   Check,
   ChevronDown,
+  Copy,
   Grid2X2,
   Heart,
   Hand,
@@ -605,20 +606,21 @@ export function MeetingRoom({ code }: { code: string }) {
             >
               <h2>{meeting?.title}</h2>
               <dl className="room-info">
+                <dt>Invite Link</dt>
+                <dd>
+                  <span title={meeting?.invite_url}>{meeting?.invite_url}</span>
+                  <button
+                    aria-label="Copy invitation URL"
+                    title="Copy invitation URL"
+                    onClick={() => void copy()}
+                  >
+                    <Copy size={17} />
+                  </button>
+                </dd>
                 <dt>Meeting ID</dt>
                 <dd>{formatCode(code)}</dd>
                 <dt>Host</dt>
                 <dd>{meeting?.host_name}</dd>
-                <dt>Invite Link</dt>
-                <dd>
-                  <span>{meeting?.invite_url}</span>
-                  <button
-                    aria-label="Copy invitation URL"
-                    onClick={() => void copy()}
-                  >
-                    <Link2 size={16} />
-                  </button>
-                </dd>
               </dl>
             </RoomPopover>
           </div>
@@ -658,13 +660,19 @@ export function MeetingRoom({ code }: { code: string }) {
                   closePopover();
                 }}
               >
-                Gallery View {view === "gallery" && <Check size={16} />}
+                <span>Gallery View</span>
+                {view === "gallery" ? (
+                  <Check size={16} />
+                ) : (
+                  <Grid2X2 size={16} />
+                )}
               </button>
               <button
                 aria-pressed={view === "speaker"}
                 onClick={() => setView("speaker")}
               >
-                Speaker View {view === "speaker" && <Check size={16} />}
+                <span>Speaker View</span>
+                {view === "speaker" ? <Check size={16} /> : <Video size={16} />}
               </button>
               {view === "speaker" && (
                 <label className="speaker-select">
@@ -686,6 +694,7 @@ export function MeetingRoom({ code }: { code: string }) {
                 </label>
               )}
               <button
+                className="popover-divider"
                 aria-pressed={hideSelf}
                 onClick={() => {
                   setHideSelf(!hideSelf);
@@ -830,7 +839,7 @@ export function MeetingRoom({ code }: { code: string }) {
             )}
           </main>
           {rosterOpen && (
-            <aside className="participants-panel">
+            <aside className="participants-panel" aria-label="Participants">
               <div className="participants-heading">
                 <h2>Participants ({conference.participants.length || 1})</h2>
                 <button
@@ -855,9 +864,7 @@ export function MeetingRoom({ code }: { code: string }) {
                         {participant.display_name}
                         {participant.id === self.id ? " (You)" : ""}
                       </strong>
-                      <span>
-                        {participant.role === "host" ? "Host" : "Participant"}
-                      </span>
+                      {participant.role === "host" && <span>Host</span>}
                     </div>
                     <span className="participant-mic">
                       {participant.hand_raised && (
@@ -869,23 +876,33 @@ export function MeetingRoom({ code }: { code: string }) {
                         </span>
                       )}
                       {participant.audio_enabled ? (
-                        <Mic size={16} />
+                        <Mic size={17} aria-label="Microphone on" />
                       ) : (
-                        <MicOff size={16} />
+                        <MicOff
+                          size={17}
+                          className="media-off"
+                          aria-label="Microphone off"
+                        />
                       )}
                       {participant.video_enabled ? (
-                        <Video size={16} />
+                        <Video size={17} aria-label="Camera on" />
                       ) : (
-                        <VideoOff size={16} />
+                        <VideoOff
+                          size={17}
+                          className="media-off"
+                          aria-label="Camera off"
+                        />
                       )}
                     </span>
                     {isHost && participant.id !== self.id && (
                       <button
                         className="remove-participant"
                         aria-label={`Remove ${participant.display_name}`}
+                        title={`Remove ${participant.display_name}`}
+                        disabled={conference.connection !== "connected"}
                         onClick={() => setRemoveTarget(participant)}
                       >
-                        <X size={15} />
+                        <OctagonX size={17} />
                       </button>
                     )}
                   </div>
@@ -929,7 +946,7 @@ export function MeetingRoom({ code }: { code: string }) {
               </div>
               <div className="host-actions">
                 <button
-                  className="button secondary"
+                  className="host-action"
                   disabled={conference.connection !== "connected"}
                   onClick={() => conference.command("mute-all")}
                 >
@@ -952,23 +969,25 @@ export function MeetingRoom({ code }: { code: string }) {
                 ))}
                 {!others.length && <p>No other participants have joined.</p>}
                 <button
-                  className="button danger"
+                  className="host-action host-action-danger"
                   onClick={() => setConfirmEnd(true)}
                 >
+                  <OctagonX size={18} />
                   End Meeting for Everyone
                 </button>
               </div>
             </aside>
           )}
-          {chatOpen && (
-            <MeetingChat
-              messages={conference.chatMessages}
-              connected={conference.connection === "connected"}
-              selfId={self.id}
-              send={conference.sendChat}
-              onClose={() => setChatOpen(false)}
-            />
-          )}
+          <MeetingChat
+            open={chatOpen}
+            messages={conference.chatMessages}
+            participants={conference.participants}
+            privateChatSupported={conference.privateChatSupported}
+            connected={conference.connection === "connected"}
+            selfId={self.id}
+            send={conference.sendChat}
+            onClose={() => setChatOpen(false)}
+          />
         </div>
         <footer className="meeting-toolbar">
           <div className="toolbar-media">
@@ -1000,6 +1019,7 @@ export function MeetingRoom({ code }: { code: string }) {
           <div className="toolbar-center">
             <button
               className={`toolbar-control ${rosterOpen ? "toolbar-active" : ""}`}
+              aria-pressed={rosterOpen}
               onClick={() => {
                 setRosterOpen(!rosterOpen);
                 setChatOpen(false);
@@ -1015,6 +1035,7 @@ export function MeetingRoom({ code }: { code: string }) {
             </button>
             <button
               className={`toolbar-control ${chatOpen ? "toolbar-active" : ""}`}
+              aria-pressed={chatOpen}
               onClick={() => {
                 setChatOpen(!chatOpen);
                 setRosterOpen(false);
@@ -1064,6 +1085,7 @@ export function MeetingRoom({ code }: { code: string }) {
                 ))}
               </div>
               <button
+                className="raise-hand-control"
                 disabled={conference.connection !== "connected"}
                 onClick={() => {
                   conference.raiseHand(!self.hand_raised);
@@ -1094,6 +1116,7 @@ export function MeetingRoom({ code }: { code: string }) {
             {isHost && (
               <button
                 className={`toolbar-control host-tools ${hostToolsOpen ? "toolbar-active" : ""}`}
+                aria-pressed={hostToolsOpen}
                 onClick={() => {
                   setHostToolsOpen(!hostToolsOpen);
                   setRosterOpen(false);

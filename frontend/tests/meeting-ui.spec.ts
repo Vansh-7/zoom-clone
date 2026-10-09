@@ -116,6 +116,105 @@ async function cameraPlayback(page: Page) {
     .toBe(true);
 }
 
+test("meeting popovers stay inside the room and above panels through resizing", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(120000);
+  const created = await (
+    await request.post(`${API}/api/meetings/instant`)
+  ).json();
+  const code = created.meeting.meeting_code;
+  const assertPopover = async (label: string) => {
+    const dialog = page.getByRole("dialog", { name: label, exact: true });
+    await expect(dialog).toBeVisible();
+    await expect
+      .poll(() =>
+        dialog.evaluate((node) => {
+          const box = node.getBoundingClientRect();
+          const room = node.closest(".meeting-room")!.getBoundingClientRect();
+          return (
+            box.left >= room.left &&
+            box.right <= room.right &&
+            box.top >= room.top &&
+            box.bottom <= room.bottom &&
+            box.left >= 0 &&
+            box.right <= innerWidth &&
+            box.bottom <= innerHeight
+          );
+        }),
+      )
+      .toBe(true);
+    for (const button of await dialog.getByRole("button").all()) {
+      await button.scrollIntoViewIfNeeded();
+      await button.click({ trial: true });
+    }
+  };
+  try {
+    await page.goto(FRONTEND);
+    await page.evaluate(
+      ({ code, token }) => localStorage.setItem(`zoom:host:${code}`, token),
+      { code, token: created.host_token },
+    );
+    await page.goto(`${FRONTEND}/meeting/${code}`);
+    await page.getByLabel("Your name", { exact: true }).fill("Alex Morgan");
+    await page
+      .getByRole("button", { name: "Start Meeting", exact: true })
+      .click();
+    await expect(page.locator(".room-connection")).toContainText("Connected");
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 768, height: 1024 },
+      { width: 390, height: 844 },
+      { width: 844, height: 390 },
+    ]) {
+      await page
+        .getByRole("button", { name: "Meeting information", exact: true })
+        .click();
+      await page.setViewportSize(viewport);
+      await assertPopover("Meeting information");
+      if (viewport.width === 1440)
+        await page.screenshot({ path: "../artifacts/meeting-info-1440.png" });
+      await page.keyboard.press("Escape");
+      await expect(
+        page.getByRole("button", { name: "Meeting information", exact: true }),
+      ).toBeFocused();
+      for (const panel of ["Show participants", "Show chat", "Host Tools"]) {
+        const toggle = page.getByRole("button", { name: panel, exact: true });
+        await toggle.click();
+        await expect(toggle).toHaveAttribute("aria-pressed", "true");
+        await page
+          .getByRole("button", { name: "Meeting view", exact: true })
+          .click();
+        await page
+          .getByRole("button", { name: "Speaker View", exact: true })
+          .click();
+        await assertPopover("Meeting view");
+        await page.keyboard.press("Escape");
+        await page
+          .getByRole("button", { name: "Reactions", exact: true })
+          .click();
+        await assertPopover("Meeting reactions");
+        await page.keyboard.press("Escape");
+        await expect(
+          page.getByRole("button", { name: "Reactions", exact: true }),
+        ).toBeFocused();
+        await page
+          .getByRole("button", { name: "More meeting controls", exact: true })
+          .click();
+        await assertPopover("More meeting controls");
+        await page.keyboard.press("Escape");
+        await toggle.click();
+        await expect(toggle).toHaveAttribute("aria-pressed", "false");
+      }
+    }
+  } finally {
+    await request.post(`${API}/api/meetings/${code}/end`, {
+      headers: { Authorization: `Bearer ${created.host_token}` },
+    });
+  }
+});
+
 test("four participants synchronize reactions, raised hands, speaker view and self view while sharing", async ({
   browser,
   request,

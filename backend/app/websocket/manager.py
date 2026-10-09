@@ -94,6 +94,28 @@ def authenticate(code: str, digest: str):
         return dict(participant)
 
 
+def chat_recipient_name(code: str, participant_id: int) -> str:
+    with SessionLocal() as db:
+        name = db.scalar(
+            select(MeetingParticipant.display_name)
+            .join(Meeting, Meeting.id == MeetingParticipant.meeting_id)
+            .where(
+                Meeting.meeting_code == code,
+                Meeting.status == "in_progress",
+                MeetingParticipant.id == participant_id,
+                MeetingParticipant.left_at.is_(None),
+                MeetingParticipant.removed_at.is_(None),
+            )
+        )
+        if name is None:
+            raise AppError(
+                409,
+                "CHAT_RECIPIENT_UNAVAILABLE",
+                "This participant is no longer connected. Choose another recipient.",
+            )
+        return name
+
+
 async def receive_text(socket: WebSocket, limit: int = MAX_MESSAGE_BYTES) -> str:
     event = await socket.receive()
     if event["type"] == "websocket.disconnect":
@@ -247,6 +269,7 @@ class RoomManager:
                 {
                     "type": "welcome",
                     "self_id": connection.id,
+                    "capabilities": ["private-chat"],
                     "participants": [c.public() for c in room.values()],
                 }
             )
@@ -404,6 +427,41 @@ class RoomManager:
                                 "INVALID_CHAT",
                                 "Messages must contain 1–2000 characters.",
                             )
+                        recipient_id = message.get("recipient_id")
+                        recipient = None
+                        recipient_name = None
+                        if recipient_id is not None:
+                            if (
+                                type(recipient_id) is not int
+                                or recipient_id <= 0
+                                or recipient_id == connection.id
+                            ):
+                                raise AppError(
+                                    422,
+                                    "INVALID_CHAT_RECIPIENT",
+                                    "Choose another participant or Everyone.",
+                                )
+                            recipient = self.rooms.get(code, {}).get(recipient_id)
+                            if recipient is None:
+                                raise AppError(
+                                    409,
+                                    "CHAT_RECIPIENT_UNAVAILABLE",
+                                    "This participant is no longer connected. Choose another recipient.",
+                                )
+                            recipient_name = await run_in_threadpool(
+                                chat_recipient_name, code, recipient_id
+                            )
+                            # A leave/removal may have completed during the database check.
+                            # Never fall back to a broadcast or a different session.
+                            if (
+                                self.rooms.get(code, {}).get(recipient_id)
+                                is not recipient
+                            ):
+                                raise AppError(
+                                    409,
+                                    "CHAT_RECIPIENT_UNAVAILABLE",
+                                    "This participant is no longer connected. Choose another recipient.",
+                                )
                         if time.monotonic() - connection.last_chat_at < 0.5:
                             raise AppError(
                                 429,
@@ -411,19 +469,24 @@ class RoomManager:
                                 "Please wait a moment before sending another message.",
                             )
                         connection.last_chat_at = time.monotonic()
-                        await self.broadcast(
-                            code,
-                            {
-                                "type": "chat",
-                                "chat": {
-                                    "id": uuid.uuid4().hex,
-                                    "participant_id": connection.id,
-                                    "display_name": connection.display_name,
-                                    "text": text.strip(),
-                                    "sent_at": utcnow().isoformat(),
-                                },
+                        event = {
+                            "type": "chat",
+                            "chat": {
+                                "id": uuid.uuid4().hex,
+                                "participant_id": connection.id,
+                                "display_name": connection.display_name,
+                                "recipient_id": recipient_id,
+                                "recipient_name": recipient_name,
+                                "text": text.strip(),
+                                "sent_at": utcnow().isoformat(),
                             },
-                        )
+                        }
+                        if recipient is None:
+                            await self.broadcast(code, event)
+                        else:
+                            await asyncio.gather(
+                                connection.send(event), recipient.send(event)
+                            )
                     elif kind in ("mute-all", "remove-participant"):
                         if connection.role != "host":
                             raise AppError(
