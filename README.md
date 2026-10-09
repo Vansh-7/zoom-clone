@@ -9,9 +9,9 @@ A Zoom-inspired browser application for instant meetings, scheduling, and meetin
 - Home dashboard and split-view meeting manager with upcoming and previous meetings from SQLite.
 - Instant meetings with unique 11-digit IDs, shareable invitations, and joining by ID or link.
 - Scheduling with local date/time, timezone display, duration, and downloadable calendar invitations.
-- Two-person audio/video, media preview, microphone/camera controls, screen sharing, and meeting chat.
+- Two-person audio/video, prejoin camera/microphone selection, media preview, screen sharing, and meeting chat.
 - Server-authorized host start, mute-all, participant removal, and end-for-everyone controls.
-- Responsive pages, keyboard navigation, media permission messages, connection diagnostics, and ICE retry.
+- Responsive pages, keyboard navigation, permission messages, separate signaling/media status, diagnostics, and ICE retry.
 
 ## Stack and architecture
 
@@ -71,17 +71,18 @@ For a local production build, replace `npm.cmd run dev` with `npm.cmd run build`
 
 Use [backend/.env.example](backend/.env.example) and [frontend/.env.example](frontend/.env.example). Never commit actual environment files or TURN credentials.
 
-| Variable                   | Purpose                                                               |
-| -------------------------- | --------------------------------------------------------------------- |
-| `NEXT_PUBLIC_API_BASE_URL` | Backend origin, set before the frontend build.                        |
-| `DATABASE_URL`             | SQLite path; Railway uses `sqlite:////data/zoom.db`.                  |
-| `FRONTEND_URL`             | Public frontend origin used in invitation links.                      |
-| `CORS_ORIGINS`             | Comma-separated allowed browser origins, also checked for WebSockets. |
-| `SEED_DATA`                | Enable repeatable sample data and future sample replenishment.        |
-| `MAX_PARTICIPANTS`         | Room capacity; default `2`.                                           |
-| `DISCONNECT_GRACE_SECONDS` | Host disconnect grace period; default `30`.                           |
-| `ICE_SERVERS_JSON`         | JSON array of STUN/TURN server definitions.                           |
-| `ICE_TRANSPORT_POLICY`     | `all` normally; `relay` for relay-only verification.                  |
+| Variable                   | Purpose                                                                 |
+| -------------------------- | ----------------------------------------------------------------------- |
+| `NEXT_PUBLIC_API_BASE_URL` | Backend origin, set before the frontend build.                          |
+| `DATABASE_URL`             | SQLite path; Railway uses `sqlite:////data/zoom.db`.                    |
+| `FRONTEND_URL`             | Public frontend origin used in invitation links.                        |
+| `CORS_ORIGINS`             | Comma-separated allowed browser origins, also checked for WebSockets.   |
+| `SEED_DATA`                | Enable repeatable sample data and future sample replenishment.          |
+| `MAX_PARTICIPANTS`         | Room capacity; default `2`.                                             |
+| `DISCONNECT_GRACE_SECONDS` | Host disconnect grace period; default `30`.                             |
+| `ICE_SERVERS_JSON`         | JSON array of STUN/TURN server definitions.                             |
+| `ICE_TRANSPORT_POLICY`     | `all` normally; `relay` for relay-only verification.                    |
+| `TRUSTED_PROXY_CIDRS`      | Confirmed proxy peers allowed to supply client identity; empty locally. |
 
 1. **Railway:** use `backend` as the root directory and its Dockerfile. Mount a persistent volume at `/data`, set `DATABASE_URL=sqlite:////data/zoom.db`, and configure `/api/health` as the health check. Keep one worker and one replica. The startup script reads Railway's `PORT` and enforces WebSocket transport limits.
 2. Set `FRONTEND_URL` and `CORS_ORIGINS` to the exact HTTPS frontend origin. Preserve the volume and existing variables when updating the service. Check volume permissions before changing the runtime user.
@@ -113,7 +114,7 @@ npm.cmd run test:e2e
 
 Start both servers before Playwright. Tests default to ports 3000 and 8000; `E2E_FRONTEND_URL` and `E2E_API_URL` override them. Use a separate SQLite database for browser tests because they create meeting records. Relay tests require `E2E_RTC_CONFIG_FILE`; they skip when no fixture is supplied.
 
-Verified on October 9, 2026: 84 backend tests, Ruff, frontend lint, type checking, formatting, and production build passed. All 16 existing local Playwright tests passed, including synthetic bidirectional audio/video, ICE recovery, screen sharing, chat, host controls, and local TURN relay tests over UDP and TCP. SQLite persistence was verified across a local backend restart. Separate three/four-person checks and their limits are documented in [mesh verification](docs/MESH_VERIFICATION.md); production remains capped at two.
+Verified on October 9, 2026: 104 backend tests and 19 local Chrome Playwright tests passed, including synthetic bidirectional media, device switching, ICE recovery, sharing, chat, host controls, and local UDP/TCP relay tests. Ruff, frontend lint, type checking, formatting, and production build passed. See [release checks](docs/RELEASE_CHECKS.md) for deployment status and [mesh verification](docs/MESH_VERIFICATION.md) for separate three/four-person measurements. Production remains capped at two.
 
 ## Limitations
 

@@ -34,11 +34,25 @@ Obtain a TURN hostname, supported ports/transports, username, credential, expiry
 ]
 ```
 
-Use only URLs and ports supported by your provider. Keep `ICE_TRANSPORT_POLICY=all` for normal operation. Redeploy, then check `/api/rtc-config` without copying credentials into logs, screenshots, or Git.
+Use only URLs and ports supported by your provider. Some providers use TCP/TLS port 443 instead of these example ports. Do not assume a provider's STUN hostname also accepts TURN. Keep `ICE_TRANSPORT_POLICY=all` for normal operation.
 
-To verify the relay, temporarily use `ICE_TRANSPORT_POLICY=relay`, start a fresh two-person meeting, and inspect the selected candidate pair and inbound/outbound RTP in `chrome://webrtc-internals`. Both participants must receive audio and decoded video frames. Test each supported transport, then restore `all` and redeploy.
+1. Choose a provider and obtain its browser-compatible TURN URLs and username/password credentials. Confirm expiry, traffic quota, supported transports, and renewal rules. Credentials must remain valid for the evaluation period and new ICE allocations.
+2. In Railway, open the existing `zoom-api` service, production environment, then Variables. Replace `ICE_SERVERS_JSON` with the JSON array above using the issued values. Keep the existing volume, database path, origins, replica count, and participant limit. Do not put credentials in Vercel, Git, or this document.
+3. Obtain release approval before applying the variable changes and redeploying. Existing calls are interrupted. Check backend health and startup logs. In a private browser session, inspect `/api/rtc-config` and confirm it contains the expected TURN schemes and policy without saving or sharing its credential-bearing response. New connections fetch this configuration; existing peers retain their old ICE settings.
+4. For each supported transport, temporarily configure exactly one TURN URL and `ICE_TRANSPORT_POLICY=relay`. Offering UDP, TCP, and TLS together can fall back to another transport and does not prove all three work. Apply the changes, then open fresh browser contexts and a fresh meeting.
+5. Use two physical devices with headsets, first on Wi-Fi and then on separate Wi-Fi/mobile networks. Open `chrome://webrtc-internals` before joining. Verify the selected candidate pair uses a relay and the intended transport. On both devices, confirm increasing outbound and inbound audio/video packets, decoded video frames, visible remote video, and audible remote sound. A connected signaling indicator alone is insufficient.
+6. Toggle camera/microphone, share a screen and stop sharing, retry ICE, leave/rejoin, send chat, and exercise host controls. If ICE fails, copy the application's connection diagnostics. They omit candidate addresses, SDP, tokens, and credentials. Do not share raw browser WebRTC dumps without reviewing their sensitive contents.
+7. Restore all supported TURN URLs and `ICE_TRANSPORT_POLICY=all`, apply the changes, and repeat a fresh two-device meeting. Record the tested devices, browsers, networks, transports, and date. Keep `MAX_PARTICIPANTS=2`.
 
-Browsers must receive ICE credentials to use TURN. Use restricted credentials with quotas and rotate them as the provider requires. Automatic issuance of short-lived TURN credentials is not implemented. See [WebRTC TURN guidance](https://webrtc.org/getting-started/turn-server).
+Browsers must receive ICE credentials to use TURN; this application's public RTC configuration returns them to meeting clients. Use provider restrictions and quotas and rotate credentials as required. Do not use an unrestricted administrative credential. Automatic issuance or renewal of short-lived TURN credentials is not implemented. See [WebRTC TURN guidance](https://webrtc.org/getting-started/turn-server).
+
+## Proxy identity and rate limits
+
+Railway's edge supplies `X-Real-IP`, documented in its [public networking reference](https://docs.railway.com/networking/public-networking/specs-and-limits). The application accepts that header only when the actual socket peer belongs to an explicit `TRUSTED_PROXY_CIDRS` allowlist. The same resolved identity is used by REST limits and WebSocket admission. Uvicorn's implicit forwarded-header handling is disabled, and caller-supplied `X-Forwarded-For` never selects a budget.
+
+Leave the allowlist empty for local use. Before enabling it in Railway, confirm the edge's source range and that the edge replaces incoming `X-Real-IP`. The observed service peers during this audit were within `100.64.0.0/24`; that observation is not a documented Railway guarantee. Set that range only after confirming it applies to this service, or use the narrower confirmed IPs/CIDRs. Do not use `*`, an all-address range, or the whole shared-address space. Recheck the policy after region/network changes. No production variable was changed during this audit.
+
+With an empty allowlist or an unrecognized edge peer, limits fall back to the socket address. This prevents header-based bypass but can make clients behind an edge share a budget. Configuration validation and tests cover empty/untrusted/duplicate/malformed headers, distinct client budgets, and matching HTTP/WebSocket identity. Production identity verification remains a release check.
 
 ## Acceptance checks
 
@@ -53,6 +67,6 @@ Browsers must receive ICE credentials to use TURN. Use restricted credentials wi
 
 Repeat media checks with physical devices on the intended networks. Synthetic browser tests and a local TURN fixture verify application behavior, but do not verify a hosted relay, device drivers, or network firewalls.
 
-Public REST endpoints use bounded in-memory token buckets with separate budgets for creation, joining, claiming samples, reads, and host actions. Excess traffic receives `429` with `Retry-After`. Health checks, CORS preflight, and participant leave requests remain available. Limits use the server-resolved client address; users behind a shared proxy can share a budget. Do not trust arbitrary forwarded headers to bypass this behavior.
+Public REST endpoints use bounded in-memory token buckets with separate budgets for creation, joining, claiming samples, reads, and host actions. Excess traffic receives `429` with `Retry-After`. Health checks, CORS preflight, and participant leave requests remain available. Users behind a shared public IP can share a budget even with correctly configured proxy identity.
 
 Dependency check on October 9, 2026: `npm audit --omit=dev` reports zero vulnerabilities. The full audit reports five high-severity entries in the ESLint dependency chain, originating from [the braces advisory](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm). No patched braces version is available. Keep lint inputs limited to the trusted repository and recheck for an upstream fix; a forced downgrade of Next.js tooling was not applied.
