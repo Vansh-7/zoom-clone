@@ -128,18 +128,35 @@ async function packets(page: Page) {
     const peers =
       (window as Window & { __testPeers?: RTCPeerConnection[] }).__testPeers ??
       [];
-    const result = { audio: 0, video: 0, relay: false };
+    const result = {
+      audio: 0,
+      video: 0,
+      audioOut: 0,
+      videoOut: 0,
+      frames: 0,
+      relay: false,
+      relayProtocol: "",
+    };
     for (const pc of peers) {
       const stats = await pc.getStats();
       stats.forEach((report) => {
         if (report.type === "inbound-rtp" && report.kind === "audio")
           result.audio += report.packetsReceived ?? 0;
-        if (report.type === "inbound-rtp" && report.kind === "video")
+        if (report.type === "inbound-rtp" && report.kind === "video") {
           result.video += report.packetsReceived ?? 0;
+          result.frames += report.framesDecoded ?? 0;
+        }
+        if (report.type === "outbound-rtp" && report.kind === "audio")
+          result.audioOut += report.packetsSent ?? 0;
+        if (report.type === "outbound-rtp" && report.kind === "video")
+          result.videoOut += report.packetsSent ?? 0;
         if (report.type === "transport" && report.selectedCandidatePairId) {
           const pair = stats.get(report.selectedCandidatePairId);
+          const local = stats.get(pair.localCandidateId);
           result.relay =
-            stats.get(pair.localCandidateId)?.candidateType === "relay";
+            local?.candidateType === "relay" &&
+            stats.get(pair.remoteCandidateId)?.candidateType === "relay";
+          result.relayProtocol = local?.relayProtocol ?? "";
         }
       });
     }
@@ -418,7 +435,7 @@ test("ICE failure diagnostics and retry recover without leaving the room", async
   }
 });
 
-for (const transport of ["udp", "tcp"] as const)
+for (const transport of ["udp", "tcp", "tls"] as const)
   test(`relay-only ${transport} transport receives real audio and video in both directions`, async ({
     browser,
     request,
@@ -434,13 +451,13 @@ for (const transport of ["udp", "tcp"] as const)
     const relayServers = config.ice_servers.flatMap((server: RTCIceServer) => {
       const urls = (
         Array.isArray(server.urls) ? server.urls : [server.urls]
-      ).filter(
-        (url) =>
-          /^turns?:/.test(url) &&
-          (transport === "tcp"
-            ? url.includes("transport=tcp") ||
-              (url.startsWith("turns:") && !url.includes("transport=udp"))
-            : !url.startsWith("turns:") && !url.includes("transport=tcp")),
+      ).filter((url) =>
+        transport === "tls"
+          ? /^turns:/.test(url) && !url.includes("transport=udp")
+          : /^turn:/.test(url) &&
+            (transport === "tcp"
+              ? url.includes("transport=tcp")
+              : !url.includes("transport=tcp")),
       );
       return urls.length ? [{ ...server, urls }] : [];
     });
@@ -456,13 +473,39 @@ for (const transport of ["udp", "tcp"] as const)
     });
     try {
       for (const page of [room.host, room.guest]) {
+        const before = await packets(page);
         await expect
-          .poll(async () => (await packets(page)).audio, { timeout: 30000 })
-          .toBeGreaterThan(0);
+          .poll(
+            async () => {
+              const after = await packets(page);
+              return (
+                after.relay &&
+                ["audio", "video", "audioOut", "videoOut", "frames"].every(
+                  (key) =>
+                    after[key as keyof typeof before] >
+                    before[key as keyof typeof before],
+                )
+              );
+            },
+            { timeout: 30000 },
+          )
+          .toBe(true);
+        const report = await packets(page);
+        if (report.relayProtocol) expect(report.relayProtocol).toBe(transport);
+        await expect(page.locator(".media-connection")).toHaveAttribute(
+          "data-state",
+          "connected",
+        );
         await expect
-          .poll(async () => (await packets(page)).video, { timeout: 30000 })
-          .toBeGreaterThan(0);
-        expect((await packets(page)).relay).toBe(true);
+          .poll(() =>
+            page.locator(".video-tile video").evaluateAll((elements) =>
+              elements.some((element) => {
+                const video = element as HTMLVideoElement;
+                return !video.muted && video.videoWidth > 0 && !video.paused;
+              }),
+            ),
+          )
+          .toBe(true);
       }
       await test.info().attach("relay-rtp", {
         body: JSON.stringify({
