@@ -378,6 +378,13 @@ test("ICE failure diagnostics and retry recover without leaving the room", async
     expect(report.peers[0].remoteGatheringComplete).toBe(true);
     expect(report.peers[0].remoteCandidates.host).toBeGreaterThan(0);
     expect(report.peers[0].connection).toBe("failed");
+    await expect(room.guest.locator(".room-connection")).toContainText(
+      "Signaling: Connected",
+    );
+    await expect(room.guest.locator(".media-connection")).toHaveAttribute(
+      "data-state",
+      "failed",
+    );
     expect(JSON.stringify(report)).not.toMatch(
       /candidate:|ice-pwd|credential|username|address|sdp/i,
     );
@@ -401,6 +408,10 @@ test("ICE failure diagnostics and retry recover without leaving the room", async
         .poll(async () => (await packets(page)).video, { timeout: 25000 })
         .toBeGreaterThan(0);
       await expect(page.locator(".room-error")).toHaveCount(0);
+      await expect(page.locator(".media-connection")).toHaveAttribute(
+        "data-state",
+        "connected",
+      );
     }
   } finally {
     await room.close();

@@ -2150,6 +2150,35 @@ select {
 .room-offline {
   color: #e8af6b;
 }
+.connection-status {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.media-connection {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  white-space: nowrap;
+  color: #c2c7ce;
+}
+.media-connected {
+  color: #8ed6a7;
+}
+.media-failed,
+.media-interrupted,
+.media-unavailable {
+  color: #e8af6b;
+}
+@media (max-width: 700px) {
+  .media-connection {
+    font-size: 10px;
+  }
+  .connection-status svg {
+    width: 11px;
+  }
+}
 .room-timer {
   font-size: 11px;
   color: #aaa;

@@ -23,7 +23,6 @@ import {
   MessageSquare,
   OctagonX,
   ShieldCheck,
-  Signal,
   Users,
   Video,
   VideoOff,
@@ -43,6 +42,7 @@ import { useScreenShare } from "@/hooks/use-screen-share";
 import type { Admission, Meeting, Participant } from "@/types";
 import { MeetingDetails } from "./meeting-dialogs";
 import { MeetingChat } from "./meeting-chat";
+import { ConnectionStatus } from "./connection-status";
 import { WorkspaceShell } from "./workspace-shell";
 import { WorkplaceBrand } from "./workplace-brand";
 import { ErrorNotice, Modal, Spinner, useToast } from "./ui";
@@ -478,16 +478,11 @@ export function MeetingRoom({ code }: { code: string }) {
             </button>
           </div>
           <div className="room-header-right">
-            <span
-              className={`room-connection ${conference.connection !== "connected" ? "room-offline" : ""}`}
-            >
-              <Signal size={14} />
-              {conference.connection === "connected"
-                ? "Connected"
-                : conference.connection === "disconnected"
-                  ? "Disconnected"
-                  : "Connecting"}
-            </span>
+            <ConnectionStatus
+              signaling={conference.connection}
+              participants={others}
+              peerStates={conference.peerStates}
+            />
             <span className="room-timer">
               {Math.floor(duration / 60)
                 .toString()
