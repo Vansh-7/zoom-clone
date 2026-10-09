@@ -16,6 +16,7 @@ from app.schemas import (
     UserResponse,
 )
 from app.services import meetings as service
+from app.services.calendar import calendar_file
 from app.websocket.manager import manager
 
 router = APIRouter(prefix="/api")
@@ -81,6 +82,18 @@ def claim(code: str, db: DB):
     meeting = service.get_meeting(db, code)
     token = service.claim_demo(db, meeting)
     return {"meeting": service.serialize(meeting), "host_token": token}
+
+
+@router.get("/meetings/{code}/calendar")
+def calendar(code: str, db: DB):
+    return Response(
+        calendar_file(service.get_meeting(db, code)),
+        media_type="text/calendar; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="meeting-{code}.ics"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.post("/meetings/{code}/start", response_model=MeetingResponse)
