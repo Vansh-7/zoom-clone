@@ -142,6 +142,7 @@ export function ScheduleForm({
           <input
             id="schedule-topic"
             autoFocus
+            disabled={!timezone}
             required
             maxLength={200}
             placeholder="My Meeting"
@@ -163,6 +164,7 @@ export function ScheduleForm({
           <label className="schedule-field">
             Description <span className="optional">(optional)</span>
             <textarea
+              disabled={!timezone}
               maxLength={2000}
               rows={3}
               placeholder="What would you like to discuss?"
@@ -174,6 +176,7 @@ export function ScheduleForm({
           <button
             type="button"
             className="text-button add-description"
+            disabled={!timezone}
             onClick={() => setShowDescription(true)}
           >
             <Plus size={16} />
@@ -188,6 +191,7 @@ export function ScheduleForm({
             <span className="sr-only">Date</span>
             <input
               aria-label="Date"
+              disabled={!timezone}
               type="date"
               min={minimumDate}
               required
@@ -199,6 +203,7 @@ export function ScheduleForm({
             <span className="sr-only">Time</span>
             <input
               aria-label="Time"
+              disabled={!timezone}
               type="time"
               required
               value={time}
@@ -212,6 +217,7 @@ export function ScheduleForm({
         <div className="schedule-field duration-field">
           <select
             id="schedule-duration"
+            disabled={!timezone}
             value={duration}
             onChange={(event) => setDuration(Number(event.target.value))}
           >
