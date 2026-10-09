@@ -14,6 +14,8 @@ def server_config(host: str, port: int) -> uvicorn.Config:
         host=host,
         port=port,
         workers=1,
+        # Identity is resolved by the explicit X-Real-IP trust policy, for HTTP and WS.
+        proxy_headers=False,
         ws="websockets",
         ws_max_size=MAX_MESSAGE_BYTES,
         ws_max_queue=16,

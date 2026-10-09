@@ -15,6 +15,7 @@ from app.api.rate_limit import RestRateLimiter, RestRateLimitMiddleware
 from app.config import get_settings
 from app.database import Base, SessionLocal, engine, utcnow
 from app.models import Meeting, MeetingParticipant
+from app.proxy import TrustedProxyMiddleware
 from app.services.meetings import AppError, reconcile_schedules, seed_database
 from app.websocket.manager import manager
 
@@ -82,6 +83,9 @@ app = FastAPI(
 )
 app.state.rest_limiter = RestRateLimiter()
 app.add_middleware(RestRateLimitMiddleware)
+app.add_middleware(
+    TrustedProxyMiddleware, trusted_proxy_cidrs=get_settings().trusted_proxy_cidrs
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().allowed_origins,

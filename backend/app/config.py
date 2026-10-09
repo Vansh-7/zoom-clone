@@ -1,4 +1,5 @@
 import json
+from ipaddress import ip_network
 from functools import lru_cache
 from typing import Literal
 from urllib.parse import urlsplit
@@ -81,6 +82,22 @@ class Settings(BaseSettings):
     disconnect_grace_seconds: float = 30
     ice_servers_json: str = '[{"urls":"stun:stun.l.google.com:19302"}]'
     ice_transport_policy: Literal["all", "relay"] = "all"
+    trusted_proxy_cidrs: str = ""
+
+    @field_validator("trusted_proxy_cidrs")
+    @classmethod
+    def valid_proxy_networks(cls, value: str) -> str:
+        try:
+            networks = [
+                ip_network(item.strip()) for item in value.split(",") if item.strip()
+            ]
+            if any(network.prefixlen == 0 for network in networks):
+                raise ValueError()
+            return ",".join(str(network) for network in networks)
+        except ValueError:
+            raise ValueError(
+                "TRUSTED_PROXY_CIDRS requires explicit proxy IPs/CIDRs, not * or all addresses"
+            ) from None
 
     @field_validator("ice_servers_json")
     @classmethod

@@ -81,8 +81,9 @@ def test_transport_rejects_oversized_messages_before_asgi_delivery(
             payload = ["é" * 16_384, "é" * 16_385]
         else:
             payload = "x" * (MAX_MESSAGE_BYTES + 1)
-        ws.send(payload)
         with pytest.raises(ConnectionClosed) as error:
+            # The server can close while the client is still sending fragments.
+            ws.send(payload)
             ws.recv(timeout=3)
         assert error.value.rcvd.code == 1009
         assert delivered == []
