@@ -113,7 +113,7 @@ npm.cmd run test:e2e
 
 Start both servers before Playwright. Tests default to ports 3000 and 8000; `E2E_FRONTEND_URL` and `E2E_API_URL` override them. Use a separate SQLite database for browser tests because they create meeting records. Relay tests require `E2E_RTC_CONFIG_FILE`; they skip when no fixture is supplied.
 
-Verified on October 9, 2026: 82 backend tests, Ruff, frontend lint, type checking, formatting, and production build passed. All 16 local Playwright tests passed, including synthetic bidirectional audio/video, ICE recovery, screen sharing, chat, host controls, and local TURN relay tests over UDP and TCP. SQLite persistence was verified across a local backend restart.
+Verified on October 9, 2026: 84 backend tests, Ruff, frontend lint, type checking, formatting, and production build passed. All 16 existing local Playwright tests passed, including synthetic bidirectional audio/video, ICE recovery, screen sharing, chat, host controls, and local TURN relay tests over UDP and TCP. SQLite persistence was verified across a local backend restart. Separate three/four-person checks and their limits are documented in [mesh verification](docs/MESH_VERIFICATION.md); production remains capped at two.
 
 ## Limitations
 

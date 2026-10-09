@@ -1,0 +1,69 @@
+# Mesh capacity verification
+
+The production participant limit remains **two**, confirmed through the public backend on October 9, 2026. No production settings, database, deployment, or infrastructure changed during this audit. The public backend currently advertises STUN only.
+
+## Implementation and fix
+
+Each browser maintains one `RTCPeerConnection` for each remote participant. Three people create three peer pairs; four create six. The lower participant ID creates the offer for each pair. Offers, answers, and ICE candidates travel through the existing room-scoped FastAPI WebSocket; media travels between peers or through the configured TURN relay.
+
+Signaling handlers are serialized, ICE candidates are matched to their description's generation, and leaving closes the departed participant's peer connections. Media track replacement applies to every peer sender. Host commands retain server-side session and role validation. SQLAlchemy models, the RoomManager architecture, and the single-worker deployment are unchanged.
+
+The audit reproduced one application bug: connecting a healthy third participant cleared the displayed error for another failed peer. The frontend now clears that error only when all remaining peer connections are healthy, or after the failed participant leaves. A test blocks a real pair's ICE candidates, joins a healthy third participant, checks the error remains visible, then verifies recovery after the failed participant leaves.
+
+## Verified scope
+
+Local Chrome tests on October 9, 2026 used separate browser contexts, synthetic microphone audio, 640×360 camera capture at up to 15 fps, and an animated synthetic screen source. These use real peer connections and RTP, with no simulated connection success.
+
+- Three- and four-person workflows passed twice each. The failed-peer error test also passed twice.
+- The complete four-person workflow also passed with relay-only ICE through a disposable local coturn fixture, once over UDP and once over TCP. All twelve peer connections selected relay candidates and carried media. This does not verify a hosted TURN provider or a different network.
+- Every participant had exactly `N-1` live peer connections and a complete roster. Every pair reached stable signaling and connected media, with increasing inbound/outbound audio/video packet counters and decoded video frames.
+- Remote video elements rendered frames and played. All guests joined concurrently after the host.
+- Concurrent ICE restart requests changed ICE credentials and restored media on every pair.
+- Host screen sharing reached every guest, including a guest joining during sharing. Microphone tracks stayed unchanged; stopping sharing restored the camera on every sender.
+- Chat from every participant reached the others with server-assigned identity. Host mute-all disabled guest audio tracks; explicit unmute and camera toggles continued working.
+- Guest attempts to mute all, remove the host, or end the meeting were rejected. Host removal and end-for-everyone worked.
+- Leaving/rejoining preserved the remaining pairs. An abruptly closed guest context did not end other participants' media. End, leave, and removal released peer connections, media tracks, and sockets.
+- Backend tests cover concurrent admission at capacities three and four, full-room rejection, all pairwise signaling routes, chat identity, host checks, and persisted participant cleanup.
+
+Backend regression checks passed: 84 pytest tests, Ruff lint, and Ruff formatting. Frontend lint, type checking, formatting, and production build passed. After restoring the local backend to two participants, all 16 existing Playwright tests passed, including local UDP/TCP relay tests. The three mesh tests skipped at that limit as intended; they passed separately at capacity four. Mandatory meeting workflows, two-person media, permissions, screen sharing, chat, host controls, and navigation cleanup remained working in that suite.
+
+## Reproduce locally
+
+Use the normal installation instructions first. Run a separate backend from `backend`:
+
+```powershell
+$env:MAX_PARTICIPANTS="4"
+$env:DATABASE_URL="sqlite:///./data/mesh-test.db"
+$env:FRONTEND_URL="http://127.0.0.1:3100"
+$env:CORS_ORIGINS="http://127.0.0.1:3100,http://localhost:3100"
+.\.venv\Scripts\python.exe -m app.server --host 127.0.0.1 --port 8002
+```
+
+In a second terminal, from `frontend`:
+
+```powershell
+$env:NEXT_PUBLIC_API_BASE_URL="http://127.0.0.1:8002"
+npm.cmd run build
+npm.cmd run start -- --port 3100
+```
+
+In a third terminal, from `frontend`:
+
+```powershell
+$env:E2E_API_URL="http://127.0.0.1:8002"
+$env:E2E_FRONTEND_URL="http://127.0.0.1:3100"
+npm.cmd run test:e2e -- tests/mesh.spec.ts --repeat-each=2
+```
+
+Mesh tests skip when the backend's advertised capacity is too small. They never change server capacity. Default runs use direct local ICE without STUN. For relay-only checks, set `E2E_RTC_CONFIG_FILE` to an ignored local JSON file containing `ice_servers` and `ice_transport_policy: "relay"`. Use one TURN transport per run. The tests assert the selected local candidate is a relay and verify media on every pair. Keep credentials out of Git and delete temporary fixtures after use. Provider configuration is described in [deployment instructions](DEPLOYMENT.md).
+
+Restore `MAX_PARTICIPANTS=2`, restart the local backend, and run the complete Playwright suite to check the two-person experience. Restore the frontend's normal API configuration before rebuilding for regular use.
+
+## Limits and remaining checks
+
+- The verified three/four-person profile is 360p at 15 fps. Earlier four-context runs at the application's default capture settings, which request 1280×720, stalled around concurrent ICE restarts on this machine. The exact cause was not isolated; four-person reliability at the default capture quality remains unresolved. Application capture settings were not changed to make tests pass.
+- Tests used one computer and short sessions. Physical cameras, speakers, different browsers, long calls, hosted TURN, and cross-network media were not verified. Synthetic packet flow does not prove audible sound or device-driver behavior.
+- Mesh upload, encoding, and decoding cost grows with participant count. Each browser sends its media to every other participant. This audit does not establish support for five or six people.
+- Screen sharing replaces the camera video track and leaves microphone audio intact. Concurrent presenters and shared-system audio were not verified.
+
+Before raising production capacity, repeat the full workflow in a test environment configured for four participants, using three/four physical devices, first on the intended Wi-Fi and then across Wi-Fi/mobile networks. Use headsets, verify each participant receives every other participant's audio/video, and inspect every pair's selected ICE candidates and RTP counters. Repeat with relay-only TURN over the provider's supported UDP, TCP, and TLS transports; then restore normal ICE policy. Test repeated joins/leaves, sharing, ICE retry, host controls, and a longer call at the desired video quality. Keep the production limit at two until that verification and an explicit capacity-change decision are complete.
