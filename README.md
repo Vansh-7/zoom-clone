@@ -89,7 +89,7 @@ Use [backend/.env.example](backend/.env.example) and [frontend/.env.example](fro
 3. **Vercel:** use `frontend` as the root directory, the Next.js preset, Node.js 22, and `NEXT_PUBLIC_API_BASE_URL=https://zoom-clone-api.up.railway.app`. Keep the stable production domain public for evaluators.
 4. Verify backend health, direct invitations, scheduling, and two-person media after deployment. HTTPS API configuration produces WSS signaling URLs. Coordinate backend restarts because active calls are interrupted; SQLite data remains on the volume.
 
-Some networks require TURN. Configure provider-issued credentials in Railway's `ICE_SERVERS_JSON`, then redeploy the backend. TURN entries require `urls`, `username`, and `credential`. Keep `ICE_TRANSPORT_POLICY=all` for normal operation. The current public configuration has STUN only, so cross-network connectivity is not guaranteed.
+Some networks require TURN. Configure provider-issued credentials in Railway's `ICE_SERVERS_JSON`, then redeploy the backend. This variable accepts a strict JSON array, not a JavaScript snippet or an `iceServers` wrapper. TURN entries require `urls`, `username`, and `credential`. Include the provider's UDP, TCP and TLS URLs, and keep `ICE_TRANSPORT_POLICY=all` for normal operation. Cross-network connectivity still requires testing on real devices.
 
 ## Tests
 
@@ -114,12 +114,12 @@ npm.cmd run test:e2e
 
 Start both servers before Playwright. Tests default to ports 3000 and 8000; `E2E_FRONTEND_URL` and `E2E_API_URL` override them. Use a separate SQLite database for browser tests because they create meeting records. Relay tests use configured TURN credentials or `E2E_RTC_CONFIG_FILE`; they skip when neither is available.
 
-Verified on October 9, 2026: 104 backend tests, 19 local two-person Chrome checks, nine WebKit workflow/layout checks, and four production browser acceptance tests passed. Ruff, frontend lint, type checking, formatting, build, and CI for the audited main commit passed. Isolated four-person mesh, UDP/TCP relay, and quality measurements passed with synthetic media. Production remains limited to two participants. See [conferencing verification and TURN setup](docs/CONFERENCING.md) for evidence, reproduction commands, browser limits, and remaining release gates.
+Verified on October 9, 2026: 104 backend tests, four production acceptance checks, and six RTC checks passed with synthetic Chrome media. The RTC checks include separate hosted TURN tests over UDP, TCP and TLS. Ruff, frontend lint, type checking, formatting and production build passed. Physical-device and cross-network media verification remains pending.
 
 ## Limitations
 
 - Signaling, chat history, and rate limits are process-local. Run one backend worker and replica with persistent SQLite storage.
-- Rooms default to two participants. Four-person capacity is verified locally with synthetic media; hosted TURN, physical-device and cross-network checks are still required before increasing the production limit.
+- Rooms default to two participants. Four-person capacity is verified locally with synthetic media; four-device hosted relay and cross-network checks are still required before increasing the production limit.
 - Host access is stored in the creating browser. Clearing its storage loses that access. A removed guest can return as a new session because account identity is not implemented.
 - Screen sharing depends on browser support. Shared-system audio, recording, and account authentication are not implemented.
 - Profile, settings, and contacts are labeled placeholders. Camera/microphone access requires HTTPS or localhost.
