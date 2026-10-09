@@ -4,6 +4,7 @@ import { CalendarDays, Clock3, Copy, Video } from "lucide-react";
 import { copyText, errorMessage, formatCode } from "@/lib/meetings";
 import type { Meeting } from "@/types";
 import { Modal, useToast } from "./ui";
+import { CalendarButton } from "./calendar-button";
 
 export function MeetingDetails({
   meeting,
@@ -85,6 +86,9 @@ export function MeetingDetails({
         </div>
       </div>
       <div className="dialog-footer">
+        {meeting.kind === "scheduled" && (
+          <CalendarButton code={meeting.meeting_code} />
+        )}
         <button className="button secondary" onClick={onClose}>
           Done
         </button>

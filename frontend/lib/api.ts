@@ -32,6 +32,7 @@ async function request<T>(
   method = "GET",
   body?: unknown,
   token?: string,
+  binary = false,
 ): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
@@ -46,6 +47,7 @@ async function request<T>(
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
+    if (response.ok && binary) return (await response.blob()) as T;
     const data = await response.json();
     if (!response.ok)
       throw new ApiError(
@@ -66,6 +68,15 @@ async function request<T>(
 }
 
 export const api = {
+  health: () => request<{ status: string }>("/api/health"),
+  calendar: (code: string) =>
+    request<Blob>(
+      `/api/meetings/${code}/calendar`,
+      "GET",
+      undefined,
+      undefined,
+      true,
+    ),
   user: () => request<User>("/api/user"),
   upcoming: () => request<Meeting[]>("/api/meetings/upcoming"),
   recent: () => request<Meeting[]>("/api/meetings/recent"),

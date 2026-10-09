@@ -4,7 +4,7 @@
   --blue: #0e72ed;
   --blue-dark: #0862d1;
   --ink: #232333;
-  --muted: #747480;
+  --muted: #626570;
   --line: #e7e8ec;
   --surface: #f5f6f8;
   --orange: #ff7427;
@@ -60,7 +60,7 @@ p {
 }
 button:focus-visible,
 a:focus-visible {
-  outline: 3px solid #91b9ff;
+  outline: 3px solid #2463bf;
   outline-offset: 3px;
 }
 input:focus,
@@ -86,7 +86,7 @@ select {
 }
 input::placeholder,
 textarea::placeholder {
-  color: #9696a2;
+  color: #687080;
 }
 textarea {
   resize: vertical;
@@ -436,8 +436,8 @@ select {
   background: #f0631f;
 }
 .hero-caption {
-  color: #a1a4af;
-  font-size: 10px;
+  color: #626a78;
+  font-size: 11px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -604,8 +604,8 @@ select {
   margin: 0 1px;
 }
 .meeting-id {
-  font-size: 11px;
-  color: #747985;
+  font-size: 12px;
+  color: #626a78;
   margin-top: 4px;
   letter-spacing: 0.15px;
 }
@@ -622,7 +622,7 @@ select {
 }
 .status-badge {
   font-size: 11px;
-  color: #818994;
+  color: #596273;
   background: #f3f5f7;
   border: 1px solid #eceef2;
   padding: 5px 7px;
@@ -655,8 +655,8 @@ select {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 9px;
-  color: #989daa;
+  font-size: 11px;
+  color: #626a78;
   background: #fcfcfd;
   border-top: 1px solid #f0f1f4;
   margin-top: auto;
@@ -743,7 +743,7 @@ select {
 .tabs > button {
   background: none;
   padding: 14px 0;
-  color: #8d919b;
+  color: #626a78;
   font-size: 13px;
   border-bottom: 2px solid transparent;
   display: flex;
@@ -1294,7 +1294,7 @@ select {
 }
 .modal-header p {
   font-size: 11px;
-  color: #9395a1;
+  color: #626a78;
   margin-top: 6px;
   line-height: 1.7;
 }
@@ -1435,7 +1435,7 @@ select {
 .meeting-description {
   font-size: 12px;
   line-height: 1.8;
-  color: #8a8d98;
+  color: #626a78;
   margin-bottom: 20px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1978,8 +1978,8 @@ select {
   letter-spacing: -0.15px;
 }
 .prejoin-meeting-info span {
-  font-size: 10px;
-  color: #9ca3b2;
+  font-size: 12px;
+  color: #626a78;
   display: block;
   margin-top: 7px;
 }
@@ -1993,8 +1993,8 @@ select {
   font-size: 12px;
 }
 .name-note {
-  font-size: 9px;
-  color: #a0a7b6;
+  font-size: 11px;
+  color: #626a78;
   margin-top: 9px;
   line-height: 1.7;
 }
@@ -2016,8 +2016,8 @@ select {
   align-items: flex-start;
   gap: 7px;
   padding-top: 17px;
-  color: #a0a8b6;
-  font-size: 9px;
+  color: #626a78;
+  font-size: 11px;
   line-height: 1.6;
 }
 .prejoin-security svg {

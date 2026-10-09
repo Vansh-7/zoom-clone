@@ -43,6 +43,7 @@ export function WorkspaceShell({
   onNavigate?: (href: string) => void;
 }) {
   const [profile, setProfile] = useState<User | null>(null);
+  const [availability, setAvailability] = useState("connecting");
   const [dialog, setDialog] = useState<"profile" | "settings" | "help" | null>(
     null,
   );
@@ -59,6 +60,35 @@ export function WorkspaceShell({
       current = false;
     };
   }, [user]);
+  useEffect(() => {
+    // All routes check database-backed health, including forms without dashboard data.
+    let current = true;
+    let checking = false;
+    async function check() {
+      if (checking) return;
+      checking = true;
+      try {
+        await api.health();
+        if (current) setAvailability("available");
+      } catch {
+        if (current) setAvailability("offline");
+      } finally {
+        checking = false;
+      }
+    }
+    void check();
+    const timer = setInterval(() => void check(), 15000);
+    window.addEventListener("online", check);
+    window.addEventListener("offline", check);
+    return () => {
+      current = false;
+      clearInterval(timer);
+      window.removeEventListener("online", check);
+      window.removeEventListener("offline", check);
+    };
+  }, []);
+  const unavailable = offline || availability === "offline";
+  const connecting = loading || availability === "connecting";
   const organizer = user ?? profile;
   function navigate(event: MouseEvent<HTMLAnchorElement>, href: string) {
     if (onNavigate) {
@@ -121,12 +151,14 @@ export function WorkspaceShell({
         )}
         <div className="header-right">
           <span
-            className={`connection-label ${offline ? "connection-offline" : loading ? "connection-pending" : ""}`}
+            className={`connection-label ${unavailable ? "connection-offline" : connecting ? "connection-pending" : ""}`}
+            role="status"
+            aria-live="polite"
           >
             <span />
-            {offline
+            {unavailable
               ? "Offline"
-              : loading
+              : connecting
                 ? "Connecting"
                 : meeting
                   ? "In a meeting"

@@ -362,7 +362,7 @@ def replenish_samples(db: Session):
                             meeting_code=generate_code(),
                             host_id=user.id,
                             title=title,
-                            description="Sample meeting — claim host access to try a call.",
+                            description="Sample meeting. Claim host access to try a call.",
                             kind="scheduled",
                             status="scheduled",
                             scheduled_at=now + timedelta(hours=hours),

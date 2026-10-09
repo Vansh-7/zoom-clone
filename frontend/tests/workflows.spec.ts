@@ -1,8 +1,168 @@
 import { test, expect, type Page } from "@playwright/test";
 import path from "node:path";
+import fs from "node:fs/promises";
 
 const API = process.env.E2E_API_URL ?? "http://127.0.0.1:8000";
 const screenshot = (name: string) => path.resolve("../artifacts", name);
+
+test("scheduled meeting downloads a UTC calendar and reports export errors", async ({
+  page,
+  request,
+}) => {
+  const title = `Calendar export ${Date.now()}`;
+  const created = await (
+    await request.post(`${API}/api/meetings/schedule`, {
+      data: {
+        title,
+        description: "Team review, priorities; next steps",
+        scheduled_at: "2030-01-02T09:00:00+05:30",
+        scheduled_timezone: "Asia/Kolkata",
+        duration_minutes: 45,
+      },
+    })
+  ).json();
+  const code = created.meeting.meeting_code;
+  await page.goto("/meetings");
+  await page.getByRole("textbox", { name: "Search meetings" }).fill(title);
+  await page.locator(".manager-meeting").first().click();
+  const downloading = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Add to Calendar", exact: true })
+    .click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe(`meeting-${code}.ics`);
+  const file = (await fs.readFile((await download.path())!, "utf8")).replace(
+    /\r\n /g,
+    "",
+  );
+  expect(file).toContain("DTSTART:20300102T033000Z\r\n");
+  expect(file).toContain("DTEND:20300102T041500Z\r\n");
+  expect(file).toContain(`URL:${created.meeting.invite_url}`);
+  expect(file).toContain(`SUMMARY:${title}`);
+  expect(
+    await (await request.get(`${API}/api/meetings/${code}`)).json(),
+  ).toEqual(created.meeting);
+  await page.route(`${API}/api/meetings/${code}/calendar`, (route) =>
+    route.fulfill({
+      status: 503,
+      json: {
+        error: {
+          code: "DATABASE_UNAVAILABLE",
+          message: "Calendar server unavailable. Try again.",
+        },
+      },
+    }),
+  );
+  await page
+    .getByRole("button", { name: "Add to Calendar", exact: true })
+    .click();
+  await expect(page.locator(".toast-visible")).toContainText(
+    "Calendar server unavailable",
+  );
+  await expect(
+    page.getByRole("button", { name: "Add to Calendar", exact: true }),
+  ).toBeEnabled();
+  await expect(page).toHaveURL(/\/meetings$/);
+});
+
+test("workflow availability reflects database health and recovers", async ({
+  page,
+}) => {
+  await page.route(`${API}/api/health`, (route) =>
+    route.fulfill({
+      status: 503,
+      json: { error: { code: "DATABASE_UNAVAILABLE", message: "Unavailable" } },
+    }),
+  );
+  for (const url of ["/join", "/schedule", "/meetings", "/"]) {
+    await page.goto(url);
+    await expect(page.locator(".connection-label")).toHaveText("Offline");
+  }
+  await page.unroute(`${API}/api/health`);
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.locator(".connection-label")).toHaveText("Available");
+});
+
+test("Back and Forward release media and sockets before rejoining", async ({
+  page,
+  request,
+}) => {
+  await page.addInitScript(() => {
+    const probe = window as unknown as Window & {
+      __navigationStreams: MediaStream[];
+      __navigationSockets: WebSocket[];
+    };
+    probe.__navigationStreams = [];
+    probe.__navigationSockets = [];
+    const getMedia = navigator.mediaDevices.getUserMedia.bind(
+      navigator.mediaDevices,
+    );
+    navigator.mediaDevices.getUserMedia = async (constraints) => {
+      const stream = await getMedia(constraints);
+      probe.__navigationStreams.push(stream);
+      return stream;
+    };
+    const Original = window.WebSocket;
+    window.WebSocket = class extends Original {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        probe.__navigationSockets.push(this);
+      }
+    };
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "New Meeting", exact: true }).click();
+  await expect(page).toHaveURL(/\/meeting\/\d{11}$/);
+  const code = page.url().split("/").pop()!;
+  await page
+    .getByRole("button", { name: "Enable camera & microphone", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Mute microphone", exact: true }),
+  ).toBeEnabled();
+  await page
+    .getByRole("button", { name: "Start Meeting", exact: true })
+    .click();
+  await expect(page.locator(".room-connection")).toContainText("Connected");
+  await page.goBack();
+  await expect(page).toHaveURL(/\/$/);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const probe = window as unknown as Window & {
+          __navigationStreams: MediaStream[];
+          __navigationSockets: WebSocket[];
+        };
+        return (
+          probe.__navigationStreams.length >= 2 &&
+          probe.__navigationStreams.every((stream) =>
+            stream.getTracks().every((track) => track.readyState === "ended"),
+          ) &&
+          probe.__navigationSockets.every(
+            (socket) => socket.readyState === WebSocket.CLOSED,
+          )
+        );
+      }),
+    )
+    .toBe(true);
+  await page.goForward();
+  await expect(page).toHaveURL(new RegExp(`/meeting/${code}$`));
+  await page.getByLabel("Your name", { exact: true }).fill("Alex Morgan");
+  await page
+    .getByRole("button", { name: "Start Meeting", exact: true })
+    .click();
+  await expect(page.locator(".room-connection")).toContainText("Connected");
+  const token = await page.evaluate(
+    (code) => localStorage.getItem(`zoom:host:${code}`),
+    code,
+  );
+  await request.post(`${API}/api/meetings/${code}/end`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await expect(
+    page.getByText("This meeting has ended.", { exact: true }),
+  ).toBeVisible();
+});
 
 test("dashboard, join validation, scheduling, and persistence", async ({
   page,

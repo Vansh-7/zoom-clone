@@ -14,6 +14,7 @@ import {
 import { formatCode, hostToken } from "@/lib/meetings";
 import type { Meeting, User } from "@/types";
 import { Spinner } from "./ui";
+import { CalendarButton } from "./calendar-button";
 
 function meetingDate(meeting: Meeting) {
   return new Date(
@@ -305,6 +306,9 @@ export function MeetingsManager({
                 <Copy size={16} />
                 Copy Invitation
               </button>
+              {selected.kind === "scheduled" && (
+                <CalendarButton code={selected.meeting_code} />
+              )}
             </div>
             {tab === "upcoming" && selected.can_claim && (
               <p className="manager-access-note">

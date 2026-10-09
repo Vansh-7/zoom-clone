@@ -43,7 +43,7 @@ function Clock() {
               minute: "2-digit",
               hour12: true,
             })
-          : "—:—"}
+          : "--:--"}
       </div>
       <p>
         {now?.toLocaleDateString(undefined, {
