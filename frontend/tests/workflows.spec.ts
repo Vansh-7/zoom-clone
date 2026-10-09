@@ -23,8 +23,16 @@ test("scheduled meeting downloads a UTC calendar and reports export errors", asy
   ).json();
   const code = created.meeting.meeting_code;
   await page.goto("/meetings");
+  const meeting = page.locator(".manager-meeting").filter({ hasText: title });
+  // Wait for hydrated, API-backed rows before using the controlled search input.
+  await expect(meeting).toBeVisible();
   await page.getByRole("textbox", { name: "Search meetings" }).fill(title);
-  await page.locator(".manager-meeting").first().click();
+  await meeting.click();
+  await expect(
+    page
+      .getByRole("region", { name: "Selected meeting details" })
+      .getByRole("heading", { name: title, exact: true }),
+  ).toBeVisible();
   const downloading = page.waitForEvent("download");
   await page
     .getByRole("button", { name: "Add to Calendar", exact: true })

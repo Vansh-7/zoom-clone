@@ -12,7 +12,8 @@ export default defineConfig({
     baseURL: process.env.E2E_FRONTEND_URL ?? "http://localhost:3000",
     timezoneId: "Asia/Kolkata",
     viewport: { width: 1440, height: 1000 },
-    trace: "retain-on-failure",
+    // Relay fixtures contain credentials; keep them out of saved network traces.
+    trace: process.env.E2E_RTC_CONFIG_FILE ? "off" : "retain-on-failure",
     screenshot: "only-on-failure",
     launchOptions: {
       args: [

@@ -278,9 +278,11 @@ test("ending a meeting cancels an unresolved camera request without restarting c
   await page
     .getByRole("button", { name: "End Meeting for All", exact: true })
     .click();
-  await expect(
-    page.getByRole("heading", { name: "This meeting has ended.", exact: true }),
-  ).toBeVisible();
+  // The host returns Home; the ended screen belongs to remote participants.
+  await expect(page).toHaveURL(new URL("/", FRONTEND).href);
+  expect(
+    (await (await request.get(`${API}/api/meetings/${code}`)).json()).status,
+  ).toBe("ended");
   await page.evaluate(() => window.__devices.release!());
   await expect.poll(() => live(page)).toEqual([]);
   expect(await page.evaluate(() => window.__devices.calls.length)).toBe(1);

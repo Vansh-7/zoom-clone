@@ -1,6 +1,7 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type CDPSession, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 
 const API = process.env.E2E_API_URL ?? "http://127.0.0.1:8000";
 const FRONTEND = process.env.E2E_FRONTEND_URL ?? "http://localhost:3000";
@@ -128,21 +129,47 @@ async function healthy(pages: Page[]) {
     .toBe(true);
 }
 
-async function sample(pages: Page[], phase: string) {
+interface ProcessUsage {
+  id: number;
+  type: string;
+  cpuTime: number;
+}
+
+async function sample(pages: Page[], phase: string, cpu: CDPSession) {
+  const { processInfo: cpuBefore } = (await cpu.send(
+    "SystemInfo.getProcessInfo",
+  )) as { processInfo: ProcessUsage[] };
   const before = await Promise.all(pages.map(snapshot));
   const start = Date.now();
-  await pages[0].waitForTimeout(5000); // A fixed observation interval, not a readiness wait.
+  const interval = Number(process.env.E2E_MESH_SAMPLE_SECONDS ?? "5");
+  if (!Number.isFinite(interval) || interval < 5 || interval > 30)
+    throw new Error("E2E_MESH_SAMPLE_SECONDS must be between 5 and 30");
+  await pages[0].waitForTimeout(interval * 1000); // Measurement interval, not a readiness wait.
   const after = await Promise.all(pages.map(snapshot));
   const seconds = (Date.now() - start) / 1000;
+  const { processInfo: cpuAfter } = (await cpu.send(
+    "SystemInfo.getProcessInfo",
+  )) as { processInfo: ProcessUsage[] };
+  // Count only processes present at both boundaries. Do not export process IDs.
+  const cpuSeconds = cpuAfter.reduce((total, current) => {
+    const previous = cpuBefore.find((process) => process.id === current.id);
+    return (
+      total + (previous ? Math.max(0, current.cpuTime - previous.cpuTime) : 0)
+    );
+  }, 0);
   const pairs = after.flatMap((browser, i) =>
     browser.peers.map((peer, j) => {
       const previous = before[i].peers[j];
+      const { ufrag: _ufrag, ...publicStats } = peer;
+      void _ufrag;
       return {
-        ...peer,
+        ...publicStats,
         encodedFps: (peer.encoded - previous.encoded) / seconds,
         decodedFps: (peer.decoded - previous.decoded) / seconds,
         videoKbpsSent:
           ((peer.bytesSent - previous.bytesSent) * 8) / seconds / 1000,
+        videoKbpsReceived:
+          ((peer.bytesReceived - previous.bytesReceived) * 8) / seconds / 1000,
         encodeMsPerFrame:
           ((peer.encodeSeconds - previous.encodeSeconds) * 1000) /
           Math.max(1, peer.encoded - previous.encoded),
@@ -160,6 +187,20 @@ async function sample(pages: Page[], phase: string) {
   return {
     phase,
     seconds,
+    browserCpu: {
+      cpuSeconds,
+      coreEquivalents: cpuSeconds / seconds,
+      logicalCores: os.availableParallelism(),
+      machinePercent: (cpuSeconds / seconds / os.availableParallelism()) * 100,
+    },
+    endpoints: after.map((_, i) => ({
+      videoKbpsSent: pairs
+        .slice(i * 3, i * 3 + 3)
+        .reduce((sum, peer) => sum + peer.videoKbpsSent, 0),
+      videoKbpsReceived: pairs
+        .slice(i * 3, i * 3 + 3)
+        .reduce((sum, peer) => sum + peer.videoKbpsReceived, 0),
+    })),
     capture: after.map((browser) => browser.capture),
     pairs,
   };
@@ -196,6 +237,7 @@ test.describe("isolated four-person measurements", () => {
       );
       const observations: unknown[] = [];
       let recoveryMs: number | undefined;
+      const cpu = await browser.newBrowserCDPSession();
       try {
         for (const page of pages) {
           await page.addInitScript((profile) => {
@@ -281,7 +323,7 @@ test.describe("isolated four-person measurements", () => {
             ),
         );
         await healthy(pages);
-        observations.push(await sample(pages, "baseline"));
+        observations.push(await sample(pages, "baseline", cpu));
         const before = await Promise.all(pages.map(snapshot));
         if (mode === "adaptive") {
           // Test capture adaptation separately from ICE: no restart, track replacement, or new SDP.
@@ -301,7 +343,7 @@ test.describe("isolated four-person measurements", () => {
             ),
           );
           await healthy(pages);
-          observations.push(await sample(pages, "reduced-360p15"));
+          observations.push(await sample(pages, "reduced-360p15", cpu));
           const after = await Promise.all(pages.map(snapshot));
           for (const [i, state] of after.entries()) {
             expect(state.capture[0].width).toBe(640);
@@ -345,7 +387,7 @@ test.describe("isolated four-person measurements", () => {
             .toBe(true);
           await healthy(pages);
           recoveryMs = Date.now() - start;
-          observations.push(await sample(pages, "after-ice-restart"));
+          observations.push(await sample(pages, "after-ice-restart", cpu));
         }
       } finally {
         const report = {
@@ -353,7 +395,18 @@ test.describe("isolated four-person measurements", () => {
           repeat: test.info().repeatEachIndex,
           recoveryMs,
           observations,
-          final: await Promise.allSettled(pages.map(snapshot)),
+          final: await Promise.allSettled(
+            pages.map(async (page) => {
+              const state = await snapshot(page);
+              return {
+                ...state,
+                peers: state.peers.map(({ ufrag: _ufrag, ...peer }) => {
+                  void _ufrag;
+                  return peer;
+                }),
+              };
+            }),
+          ),
         };
         const folder = path.resolve("../artifacts");
         fs.mkdirSync(folder, { recursive: true });
@@ -375,6 +428,7 @@ test.describe("isolated four-person measurements", () => {
           })
           .catch(() => {});
         await Promise.allSettled(contexts.map((context) => context.close()));
+        await cpu.detach();
       }
     });
   }

@@ -13,6 +13,7 @@ interface Probe {
   signals: { type: string; sender?: number; target?: number; ufrag?: string }[];
   screen?: MediaStreamTrack;
   blockMedia?: boolean;
+  blockedTargets?: number[];
 }
 declare global {
   interface Window {
@@ -87,7 +88,11 @@ async function instrument(page: Page) {
         if (typeof data === "string") {
           const message = JSON.parse(data);
           record(message);
-          if (window.__mesh.blockMedia && message.payload) {
+          if (
+            (window.__mesh.blockMedia ||
+              window.__mesh.blockedTargets?.includes(message.target)) &&
+            message.payload
+          ) {
             if (message.type === "candidate" && message.payload.candidate)
               message.payload.candidate = message.payload.candidate.replace(
                 /^(candidate:\S+ \d+ \S+ \d+) \S+ \d+/,
@@ -354,6 +359,179 @@ async function released(page: Page) {
     )
     .toBe(true);
 }
+
+test("four peers recover simultaneous failed host pairs while guest media continues", async ({
+  browser,
+  request,
+}) => {
+  test.setTimeout(120000);
+  const config = await (await request.get(`${API}/api/rtc-config`)).json();
+  test.skip(
+    config.max_participants < 4,
+    "Requires an isolated four-person backend.",
+  );
+  const created = await (
+    await request.post(`${API}/api/meetings/instant`)
+  ).json();
+  const code = created.meeting.meeting_code;
+  const contexts = await Promise.all(
+    Array.from({ length: 4 }, () =>
+      browser.newContext({ permissions: ["camera", "microphone"] }),
+    ),
+  );
+  const pages = await Promise.all(contexts.map((context) => context.newPage()));
+  const [host, ...guests] = pages;
+  for (const page of pages) page.setDefaultTimeout(15000);
+  try {
+    for (const page of pages) {
+      await instrument(page);
+      await page.route("**/api/rtc-config", (route) =>
+        route.fulfill({
+          json: { ...config, ice_servers: [], ice_transport_policy: "all" },
+        }),
+      );
+    }
+    await host.goto(FRONTEND);
+    await host.evaluate(
+      ({ code, token }) => localStorage.setItem(`zoom:host:${code}`, token),
+      { code, token: created.host_token },
+    );
+    await Promise.all(
+      pages.map(async (page, i) => {
+        await page.goto(`${FRONTEND}/meeting/${code}`);
+        await page.getByLabel("Your name").fill(`Recovery ${i}`);
+        await page
+          .getByRole("button", {
+            name: "Enable camera & microphone",
+            exact: true,
+          })
+          .click();
+        await expect(
+          page.getByRole("button", { name: "Mute microphone", exact: true }),
+        ).toBeEnabled();
+      }),
+    );
+    await host.evaluate(() => {
+      window.__mesh.blockMedia = true;
+    });
+    await host
+      .getByRole("button", { name: "Start Meeting", exact: true })
+      .click();
+    await expect
+      .poll(() => host.evaluate(() => window.__mesh.selfId))
+      .toBeTruthy();
+    const hostId = await host.evaluate(() => window.__mesh.selfId!);
+    await Promise.all(
+      guests.map(async (guest) => {
+        await guest.evaluate((id) => {
+          window.__mesh.blockedTargets = [id];
+        }, hostId);
+        await guest
+          .getByRole("button", { name: "Join Meeting", exact: true })
+          .click();
+      }),
+    );
+    await expect
+      .poll(
+        async () => {
+          const states = await Promise.all(pages.map(stats));
+          return (
+            states[0].length === 3 &&
+            states[0].every((peer) => peer.state === "failed") &&
+            states
+              .slice(1)
+              .every(
+                (peers) =>
+                  peers.filter((peer) => peer.state === "connected").length ===
+                    2 &&
+                  peers.filter((peer) => peer.state === "failed").length === 1,
+              )
+          );
+        },
+        { timeout: 60000 },
+      )
+      .toBe(true);
+    for (const page of pages) {
+      await expect(page.locator(".room-connection")).toContainText("Connected");
+      await expect(page.locator(".room-error")).toContainText(
+        "ICE could not establish",
+      );
+    }
+    const before = await Promise.all(
+      guests.map(async (page) =>
+        (await stats(page)).filter((peer) => peer.state === "connected"),
+      ),
+    );
+    await expect
+      .poll(async () =>
+        (
+          await Promise.all(
+            guests.map(async (page) =>
+              (await stats(page)).filter((peer) => peer.state === "connected"),
+            ),
+          )
+        ).every(
+          (peers, i) =>
+            peers.length === 2 &&
+            peers.every(
+              (peer, j) =>
+                peer.incomingAudio > before[i][j].incomingAudio &&
+                peer.outgoingAudio > before[i][j].outgoingAudio &&
+                peer.decoded > before[i][j].decoded,
+            ),
+        ),
+      )
+      .toBe(true);
+    await Promise.all(
+      pages.map(async (page) => {
+        await page.evaluate(() => {
+          window.__mesh.blockMedia = false;
+          window.__mesh.blockedTargets = [];
+        });
+        await page
+          .getByRole("button", { name: "Retry media connection", exact: true })
+          .click();
+      }),
+    );
+    await healthy(pages);
+    await growing(pages);
+    expect(
+      await Promise.all(
+        pages.map((page) => page.evaluate(() => window.__mesh.errors)),
+      ),
+    ).toEqual([[], [], [], []]);
+    await host.getByRole("button", { name: "End", exact: true }).click();
+    await host
+      .getByRole("button", { name: "End Meeting for All", exact: true })
+      .click();
+    await Promise.all(pages.map(released));
+  } catch (error) {
+    await test.info().attach("failed-pairs", {
+      body: JSON.stringify(
+        await Promise.allSettled(
+          pages.map(async (page) => ({
+            peers: (await stats(page)).map(({ ufrag: _ufrag, ...peer }) => {
+              void _ufrag;
+              return peer;
+            }),
+            errors: await page.evaluate(() => window.__mesh.errors),
+            notices: await page.locator(".room-error").allTextContents(),
+          })),
+        ),
+      ),
+      contentType: "application/json",
+    });
+    throw error;
+  } finally {
+    await request
+      .post(`${API}/api/meetings/${code}/end`, {
+        timeout: 5000,
+        headers: { Authorization: `Bearer ${created.host_token}` },
+      })
+      .catch(() => {});
+    await Promise.allSettled(contexts.map((context) => context.close()));
+  }
+});
 
 for (const count of [3, 4]) {
   test(`${count}-person mesh: every media pair, sharing, controls, churn, and cleanup`, async ({
