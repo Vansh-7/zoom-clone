@@ -25,7 +25,31 @@ Local Chrome tests on October 9, 2026 used separate browser contexts, synthetic 
 - Leaving/rejoining preserved the remaining pairs. An abruptly closed guest context did not end other participants' media. End, leave, and removal released peer connections, media tracks, and sockets.
 - Backend tests cover concurrent admission at capacities three and four, full-room rejection, all pairwise signaling routes, chat identity, host checks, and persisted participant cleanup.
 
-Backend regression checks passed: 84 pytest tests, Ruff lint, and Ruff formatting. Frontend lint, type checking, formatting, and production build passed. After restoring the local backend to two participants, all 16 existing Playwright tests passed, including local UDP/TCP relay tests. The three mesh tests skipped at that limit as intended; they passed separately at capacity four. Mandatory meeting workflows, two-person media, permissions, screen sharing, chat, host controls, and navigation cleanup remained working in that suite.
+The latest regression run passed 104 backend tests, Ruff lint/formatting, and 19 Chrome Playwright tests at capacity two, including local UDP/TCP relay checks. The three mesh workflow tests and three opt-in performance tests skip at that limit. The mesh workflows passed separately at capacity four. Frontend checks and release details are recorded in [release checks](RELEASE_CHECKS.md).
+
+## Capture quality and recovery measurements
+
+On October 9, 2026, an isolated four-person backend and four Chrome contexts ran each profile twice. No production setting changed. Each run verified all twelve directional peer endpoints with increasing audio/video packets and decoded frames. The measurement window was five seconds per phase; these are short local observations, not a capacity benchmark.
+
+| Test profile                                    | Observed outbound video                                                                             | Mean decoded fps per endpoint | ICE restart recovery          |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------- | ----------------------------- |
+| 1280×720 capture, requested 30 fps              | Chrome downscaled many senders to 320×180, 480×270, or 640×360; some reached 1280×720 after restart | About 20                      | 255 and 260 ms                |
+| 640×360 capture, capped at 15 fps               | 640×360 on every sender                                                                             | About 15                      | 234 and 241 ms                |
+| 720p capture reduced to 360p/15 during the call | 480×270 or 640×360 after reduction                                                                  | About 15 after reduction      | Tested without an ICE restart |
+
+Chrome reported `qualityLimitationReason=bandwidth` on the twelve high-capture senders, and `none` on the dedicated 360p senders. Mean encoding time after restart was approximately 5.4–7.6 ms per frame for the high-capture runs and 3.8 ms for 360p. Fake camera capture did not deliver sustained 30 fps encoding. The earlier high-capture stall did not recur in these runs, but its original cause remains unproven.
+
+The adaptive experiment used `MediaStreamTrack.applyConstraints` on existing camera tracks. All peer endpoints continued carrying audio/video and their ICE credentials stayed unchanged. It did not change the application, replace tracks, or renegotiate. Short samples did not show a consistent bitrate decrease after adaptation. Browser congestion control already adapted sender resolution, so automatic application adaptation was deferred. Production still requests its existing camera quality and remains limited to two participants.
+
+To reproduce the measurements on the separate four-person backend, use the setup below, then run:
+
+```powershell
+$env:E2E_MESH_PERFORMANCE="1"
+npm.cmd run test:e2e -- tests/mesh-performance.spec.ts --repeat-each=2
+Remove-Item Env:E2E_MESH_PERFORMANCE
+```
+
+The harness writes sanitized measurements to ignored `artifacts/mesh-performance-*.json` and Playwright attachments. It excludes SDP, candidate addresses, tokens, and relay credentials. The quality tests exercise concurrent ICE restart requests; the adaptive test isolates capture changes from ICE recovery. It uses direct local ICE and does not establish cross-network performance.
 
 ## Reproduce locally
 
@@ -61,7 +85,7 @@ Restore `MAX_PARTICIPANTS=2`, restart the local backend, and run the complete Pl
 
 ## Limits and remaining checks
 
-- The verified three/four-person profile is 360p at 15 fps. Earlier four-context runs at the application's default capture settings, which request 1280×720, stalled around concurrent ICE restarts on this machine. The exact cause was not isolated; four-person reliability at the default capture quality remains unresolved. Application capture settings were not changed to make tests pass.
+- The complete three/four-person workflow was verified at 360p/15 fps. Higher-capture measurement runs recovered locally, with browser downscaling; sustained four-person 720p/30 fps delivery and the earlier stall remain unresolved. Application capture settings were not changed to make tests pass.
 - Tests used one computer and short sessions. Physical cameras, speakers, different browsers, long calls, hosted TURN, and cross-network media were not verified. Synthetic packet flow does not prove audible sound or device-driver behavior.
 - Mesh upload, encoding, and decoding cost grows with participant count. Each browser sends its media to every other participant. This audit does not establish support for five or six people.
 - Screen sharing replaces the camera video track and leaves microphone audio intact. Concurrent presenters and shared-system audio were not verified.
