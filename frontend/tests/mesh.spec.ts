@@ -270,7 +270,7 @@ async function stats(page: Page) {
 async function healthy(pages: Page[]) {
   await Promise.all(
     pages.map(async (page) => {
-      await expect(page.locator(".video-tile")).toHaveCount(pages.length);
+      await expect(page.locator(".camera-tile")).toHaveCount(pages.length);
       await expect
         .poll(async () => {
           const peers = await stats(page);
@@ -769,6 +769,41 @@ for (const count of [3, 4]) {
       await healthy(pages);
       for (const guest of guests) {
         await expect(guest.locator(".screen-tile")).toContainText("Mesh 0");
+        await expect(guest.locator(".camera-tile")).toHaveCount(count);
+        await expect
+          .poll(() =>
+            guest.evaluate(async () => {
+              const screen = (
+                document.querySelector(".screen-tile video") as HTMLVideoElement
+              ).srcObject as MediaStream | null;
+              const screenId = screen?.getVideoTracks()[0]?.id;
+              const presenter = window.__mesh.peers.find(
+                (pc) =>
+                  pc.connectionState === "connected" &&
+                  pc
+                    .getReceivers()
+                    .some((receiver) => receiver.track.id === screenId),
+              );
+              if (!presenter) return false;
+              const frames = await Promise.all(
+                presenter
+                  .getReceivers()
+                  .filter((receiver) => receiver.track.kind === "video")
+                  .map(async (receiver) => {
+                    let decoded = 0;
+                    (await receiver.getStats()).forEach((report) => {
+                      if (report.type === "inbound-rtp")
+                        decoded += report.framesDecoded ?? 0;
+                    });
+                    return decoded;
+                  }),
+              );
+              return (
+                frames.length === 2 && frames.every((decoded) => decoded > 0)
+              );
+            }),
+          )
+          .toBe(true);
         await expect
           .poll(() =>
             guest
@@ -791,8 +826,15 @@ for (const count of [3, 4]) {
             .filter((pc) => pc.connectionState === "connected")
             .every(
               (pc) =>
-                pc.getSenders().find((sender) => sender.track?.kind === "video")
-                  ?.track?.id === window.__mesh.screen?.id,
+                pc
+                  .getSenders()
+                  .some(
+                    (sender) => sender.track?.id === window.__mesh.screen?.id,
+                  ) &&
+                pc
+                  .getSenders()
+                  .filter((sender) => sender.track?.kind === "video").length ===
+                  2,
             ),
         ),
       ).toBe(true);

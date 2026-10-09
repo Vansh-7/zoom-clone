@@ -52,35 +52,51 @@ function VideoTile({
   stream,
   participant,
   local = false,
+  screen = false,
   videoEnabled,
   connectionState,
 }: {
   stream?: MediaStream | null;
   participant: Participant;
   local?: boolean;
+  screen?: boolean;
   videoEnabled: boolean;
   connectionState?: string;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   useEffect(() => {
-    if (video.current && stream) {
-      video.current.srcObject = stream;
-      void video.current.play().catch(() => setAutoplayBlocked(true));
-    }
+    const element = video.current;
+    if (!element) return;
+    let active = true;
+    element.srcObject = stream ?? null;
+    if (stream)
+      void element.play().then(
+        () => {
+          if (active) setAutoplayBlocked(false);
+        },
+        (error: DOMException) => {
+          if (active && error.name === "NotAllowedError")
+            setAutoplayBlocked(true);
+        },
+      );
+    return () => {
+      active = false;
+      element.srcObject = null;
+    };
   }, [stream]);
   return (
     <div
-      className={`video-tile ${local ? "local-tile" : ""} ${participant.screen_sharing ? "screen-tile" : ""}`}
+      className={`video-tile ${local ? "local-tile" : ""} ${screen ? "screen-tile" : "camera-tile"}`}
       data-participant-id={participant.id}
     >
       <video
         ref={video}
         autoPlay
         playsInline
-        muted={local}
-        className={`${local && !participant.screen_sharing ? "mirrored" : ""} ${videoEnabled && stream ? "" : "video-hidden"}`}
-        aria-label={`${participant.display_name}${local ? " (you)" : ""} video`}
+        muted={local || screen}
+        className={`${local && !screen ? "mirrored" : ""} ${videoEnabled && stream ? "" : "video-hidden"}`}
+        aria-label={`${participant.display_name}${local ? " (you)" : ""} ${screen ? "screen" : "video"}`}
       />
       {(!videoEnabled || !stream) && (
         <div className="tile-placeholder">
@@ -104,15 +120,16 @@ function VideoTile({
           {local ? " (You)" : ""}
         </span>
         {participant.role === "host" && <span className="tile-host">Host</span>}
-        {participant.screen_sharing && (
-          <span className="tile-sharing">Sharing screen</span>
-        )}
+        {screen && <span className="tile-sharing">Sharing screen</span>}
       </div>
       {autoplayBlocked && (
         <button
           className="play-audio"
           onClick={() => {
-            void video.current?.play().then(() => setAutoplayBlocked(false));
+            void video.current
+              ?.play()
+              .then(() => setAutoplayBlocked(false))
+              .catch(() => setAutoplayBlocked(true));
           }}
         >
           Click to enable audio
@@ -142,16 +159,16 @@ export function MeetingRoom({ code }: { code: string }) {
   const [leaving, setLeaving] = useState(false);
   const [duration, setDuration] = useState(0);
   const media = useLocalMedia();
-  const screen = useScreenShare(media.stream);
+  const screen = useScreenShare();
   const conference = useConference(
     code,
     admission,
-    screen.stream,
+    media.stream,
     media.audioEnabled,
-    screen.sharing || media.videoEnabled,
+    media.videoEnabled,
     media.muteAudio,
     notify,
-    screen.sharing,
+    screen.stream,
   );
 
   const load = useCallback(async () => {
@@ -465,6 +482,29 @@ export function MeetingRoom({ code }: { code: string }) {
   const others = conference.participants.filter(
     (participant) => participant.id !== admission.participant.id,
   );
+  const cameras = (
+    <>
+      <VideoTile
+        stream={media.stream}
+        participant={{ ...self, audio_enabled: media.audioEnabled }}
+        local
+        videoEnabled={media.videoEnabled}
+      />
+      {others.map((participant) => (
+        <VideoTile
+          key={participant.id}
+          participant={participant}
+          stream={conference.remoteStreams[participant.id]}
+          videoEnabled={!!participant.video_enabled}
+          connectionState={
+            conference.peerStates[participant.id] ?? "connecting"
+          }
+        />
+      ))}
+    </>
+  );
+  const presenters = others.filter((participant) => participant.screen_sharing);
+  const presenting = screen.sharing || presenters.length > 0;
   return (
     <WorkspaceShell
       meeting
@@ -554,31 +594,42 @@ export function MeetingRoom({ code }: { code: string }) {
                 )}
               </div>
             ) : null}
-            <div
-              className={`video-grid ${others.length === 0 ? "video-grid-solo" : ""}`}
-            >
-              <VideoTile
-                stream={screen.stream}
-                participant={{
-                  ...self,
-                  audio_enabled: media.audioEnabled,
-                  screen_sharing: screen.sharing,
-                }}
-                local
-                videoEnabled={screen.sharing || media.videoEnabled}
-              />
-              {others.map((participant) => (
-                <VideoTile
-                  key={participant.id}
-                  participant={participant}
-                  stream={conference.remoteStreams[participant.id]}
-                  videoEnabled={!!participant.video_enabled}
-                  connectionState={
-                    conference.peerStates[participant.id] ?? "connecting"
-                  }
-                />
-              ))}
-            </div>
+            {presenting ? (
+              <div className="presentation-layout">
+                <div className="presentation-screens">
+                  {screen.sharing && (
+                    <VideoTile
+                      stream={screen.stream}
+                      participant={self}
+                      local
+                      screen
+                      videoEnabled
+                    />
+                  )}
+                  {presenters.map((participant) => (
+                    <VideoTile
+                      key={participant.id}
+                      stream={conference.remoteScreenStreams[participant.id]}
+                      participant={participant}
+                      screen
+                      videoEnabled
+                      connectionState={
+                        conference.peerStates[participant.id] ?? "connecting"
+                      }
+                    />
+                  ))}
+                </div>
+                <div className="camera-strip" aria-label="Participant cameras">
+                  {cameras}
+                </div>
+              </div>
+            ) : (
+              <div
+                className={`video-grid ${others.length === 0 ? "video-grid-solo" : ""}`}
+              >
+                {cameras}
+              </div>
+            )}
             {others.length === 0 && (
               <div className="alone-notice">
                 <Users size={16} />

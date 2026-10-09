@@ -52,6 +52,23 @@ async function pair(
       };
       const OriginalSocket = window.WebSocket;
       window.WebSocket = class extends OriginalSocket {
+        constructor(url: string | URL, protocols?: string | string[]) {
+          super(url, protocols);
+          if (this.url.includes("/ws/meetings/")) {
+            Object.defineProperty(window, "__testSocket", {
+              configurable: true,
+              value: this,
+            });
+            this.addEventListener("message", (event) => {
+              const message = JSON.parse(event.data);
+              if (message.type === "welcome")
+                Object.defineProperty(window, "__testSelf", {
+                  configurable: true,
+                  value: message.self_id,
+                });
+            });
+          }
+        }
         send(data: string | ArrayBufferLike | Blob | ArrayBufferView) {
           if (
             this.url.includes("/ws/meetings/") &&
@@ -111,6 +128,7 @@ async function pair(
   return {
     host,
     guest,
+    code: created.meeting.meeting_code as string,
     async close() {
       await request.post(
         `${API}/api/meetings/${created.meeting.meeting_code}/end`,
@@ -164,7 +182,400 @@ async function packets(page: Page) {
   });
 }
 
-test("screen sharing replaces video, preserves audio, and restores camera", async ({
+async function received(page: Page) {
+  return page.evaluate(async () => {
+    const result = { camera: 0, screen: 0, audio: 0 };
+    for (const pc of (
+      window as unknown as { __testPeers: RTCPeerConnection[] }
+    ).__testPeers.filter((pc) => pc.connectionState !== "closed")) {
+      let videoIndex = 0;
+      for (const transceiver of pc.getTransceivers()) {
+        const channel =
+          transceiver.receiver.track.kind === "audio"
+            ? "audio"
+            : videoIndex++ === 0
+              ? "camera"
+              : "screen";
+        (await transceiver.receiver.getStats()).forEach((report) => {
+          if (report.type === "inbound-rtp")
+            result[channel] +=
+              channel === "audio"
+                ? (report.packetsReceived ?? 0)
+                : (report.framesDecoded ?? 0);
+        });
+      }
+    }
+    return result;
+  });
+}
+
+async function displaySource(page: Page) {
+  await page.evaluate(() => {
+    navigator.mediaDevices.getDisplayMedia = async () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1280;
+      canvas.height = 720;
+      const context = canvas.getContext("2d")!;
+      const stream = canvas.captureStream(15);
+      const track = stream.getVideoTracks()[0];
+      Object.defineProperty(window, "__displayTrack", {
+        configurable: true,
+        value: track,
+      });
+      let frame = 0;
+      const paint = () => {
+        if (track.readyState !== "live") return;
+        context.fillStyle = "#1565e0";
+        context.fillRect(0, 0, 1280, 720);
+        context.fillStyle = "white";
+        context.font = "48px sans-serif";
+        context.fillText("Shared presentation", 80, 120);
+        context.fillStyle = frame++ % 2 ? "white" : "black";
+        context.fillRect(20, 20, 30, 30);
+        requestAnimationFrame(paint);
+      };
+      paint();
+      return stream;
+    };
+  });
+}
+
+async function toolbarInViewport(page: Page, host = true) {
+  const controls = page.locator(".meeting-toolbar button");
+  await expect(controls).toHaveCount(host ? 9 : 8);
+  for (const control of await controls.all()) {
+    await expect(control).toBeVisible();
+    await expect(control).toBeEnabled();
+    expect(
+      await control.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          rect.x + rect.width / 2,
+          rect.y + rect.height / 2,
+        );
+        return (
+          rect.width >= 38 &&
+          rect.height >= 44 &&
+          rect.left >= 0 &&
+          rect.top >= 0 &&
+          rect.right <= innerWidth &&
+          rect.bottom <= innerHeight &&
+          !!hit &&
+          element.contains(hit)
+        );
+      }),
+    ).toBe(true);
+    await control.click({ trial: true });
+  }
+  expect(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollHeight <= innerHeight &&
+        document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+}
+
+for (const viewport of [
+  { width: 1440, height: 900 },
+  { width: 768, height: 1024 },
+  { width: 390, height: 844 },
+])
+  test(`toolbar and dual video stay inside the ${viewport.width}px viewport with panels and fullscreen`, async ({
+    browser,
+    request,
+  }) => {
+    const room = await pair(browser, request, { ice_servers: [] });
+    try {
+      const { host, guest } = room;
+      for (const page of [host, guest]) await page.setViewportSize(viewport);
+      for (const page of [host, guest]) {
+        await expect
+          .poll(async () => (await received(page)).camera)
+          .toBeGreaterThan(0);
+        for (const video of await page.locator(".camera-tile video").all()) {
+          await expect
+            .poll(() =>
+              video.evaluate(
+                (element: HTMLVideoElement) =>
+                  element.readyState >= 2 && element.videoWidth > 0,
+              ),
+            )
+            .toBe(true);
+          const bounds = await video.boundingBox();
+          expect(bounds?.height).toBeGreaterThan(100);
+          expect(bounds?.width).toBeGreaterThan(100);
+        }
+        await toolbarInViewport(page, page === host);
+      }
+      await host.screenshot({
+        path: `../artifacts/dual-normal-${viewport.width}.png`,
+      });
+      await displaySource(host);
+      await host
+        .getByRole("button", { name: "Share screen", exact: true })
+        .click();
+      await expect(guest.locator(".screen-tile")).toBeVisible();
+      await expect
+        .poll(async () => (await received(guest)).screen)
+        .toBeGreaterThan(0);
+      await expect(guest.locator(".camera-tile")).toHaveCount(2);
+      for (const page of [host, guest])
+        await toolbarInViewport(page, page === host);
+      await guest.screenshot({
+        path: `../artifacts/dual-sharing-${viewport.width}.png`,
+      });
+      for (const page of [host, guest]) {
+        await page
+          .getByRole("button", { name: "Show chat", exact: true })
+          .click();
+        await toolbarInViewport(page, page === host);
+        await page
+          .getByRole("button", { name: "Show participants", exact: true })
+          .click();
+        await toolbarInViewport(page, page === host);
+        await page
+          .getByRole("button", { name: "Close participants", exact: true })
+          .click();
+        await page
+          .locator(".meeting-toolbar")
+          .getByRole("button", { name: "Meeting Info", exact: true })
+          .click();
+        await expect(page.getByRole("dialog")).toBeVisible();
+        await page.keyboard.press("Escape");
+        await page
+          .locator(".meeting-toolbar")
+          .getByRole("button", { name: "Invite", exact: true })
+          .click();
+      }
+      await host
+        .getByRole("button", { name: "Host Tools", exact: true })
+        .click();
+      await host
+        .getByRole("button", { name: "Close participants", exact: true })
+        .click();
+      await host.getByRole("button", { name: "End", exact: true }).click();
+      await host.keyboard.press("Escape");
+      await host
+        .getByRole("button", { name: "Toggle full screen", exact: true })
+        .click();
+      await expect
+        .poll(() => host.evaluate(() => !!document.fullscreenElement))
+        .toBe(true);
+      await toolbarInViewport(host);
+      await host
+        .getByRole("button", { name: "Toggle full screen", exact: true })
+        .click();
+      await expect
+        .poll(() => host.evaluate(() => !!document.fullscreenElement))
+        .toBe(false);
+      // A browser's sharing banner reduces viewport height. Intrinsic screen
+      // dimensions must not push the stage over the anchored toolbar.
+      await host.setViewportSize({ ...viewport, height: 600 });
+      await toolbarInViewport(host);
+      await host
+        .getByRole("button", { name: "Mute microphone", exact: true })
+        .click();
+      await host
+        .getByRole("button", { name: "Unmute microphone", exact: true })
+        .click();
+      await host
+        .getByRole("button", { name: "Stop video", exact: true })
+        .click();
+      await host
+        .getByRole("button", { name: "Start video", exact: true })
+        .click();
+      const before = await received(guest);
+      await expect
+        .poll(async () => {
+          const after = await received(guest);
+          return (
+            after.camera > before.camera &&
+            after.screen > before.screen &&
+            after.audio > before.audio
+          );
+        })
+        .toBe(true);
+      await host
+        .getByRole("button", { name: "Stop sharing screen", exact: true })
+        .click();
+      await expect(guest.locator(".screen-tile")).toHaveCount(0);
+      await toolbarInViewport(host);
+    } finally {
+      await room.close();
+    }
+  });
+
+test("answerer sharing survives viewer rejoin and ICE restart without stale tracks", async ({
+  browser,
+  request,
+}) => {
+  const room = await pair(browser, request, { ice_servers: [] });
+  try {
+    const { host, guest } = room;
+    await displaySource(guest);
+    await guest
+      .getByRole("button", { name: "Share screen", exact: true })
+      .click();
+    await expect
+      .poll(async () => (await received(host)).screen)
+      .toBeGreaterThan(0);
+    // Rejoin the guest while the host is presenting. The new pair needs both channels.
+    await displaySource(host);
+    await host
+      .getByRole("button", { name: "Share screen", exact: true })
+      .click();
+    await expect(host.locator(".screen-tile")).toHaveCount(2);
+    await guest.getByRole("button", { name: "Leave", exact: true }).click();
+    await expect(guest).toHaveURL(new URL("/", FRONTEND).href);
+    expect(
+      await guest.evaluate(() =>
+        (
+          window as unknown as { __testPeers: RTCPeerConnection[] }
+        ).__testPeers.every((pc) => pc.connectionState === "closed"),
+      ),
+    ).toBe(true);
+    expect(
+      await guest.evaluate(
+        () =>
+          (window as unknown as { __displayTrack: MediaStreamTrack })
+            .__displayTrack.readyState,
+      ),
+    ).toBe("ended");
+    await expect(host.locator(".screen-tile:not(.local-tile)")).toHaveCount(0);
+    await expect(host.locator(".camera-tile")).toHaveCount(1);
+    await guest.goto(`${FRONTEND}/meeting/${room.code}`);
+    await guest
+      .getByLabel("Your name", { exact: true })
+      .fill("RTC guest returned");
+    await guest
+      .getByRole("button", { name: "Enable camera & microphone", exact: true })
+      .click();
+    await expect(
+      guest.getByRole("button", { name: "Mute microphone", exact: true }),
+    ).toBeEnabled();
+    await guest
+      .getByRole("button", { name: "Join Meeting", exact: true })
+      .click();
+    await expect
+      .poll(async () => (await received(guest)).screen)
+      .toBeGreaterThan(0);
+    await expect(guest.locator(".camera-tile")).toHaveCount(2);
+    const hostId = await host.evaluate(
+      () => (window as unknown as { __testSelf: number }).__testSelf,
+    );
+    const oldUfrag = await guest.evaluate(
+      () =>
+        (
+          window as unknown as { __testPeers: RTCPeerConnection[] }
+        ).__testPeers[0].remoteDescription?.sdp.match(/a=ice-ufrag:(.+)/)?.[1],
+    );
+    await guest.evaluate(
+      (target) =>
+        (window as unknown as { __testSocket: WebSocket }).__testSocket.send(
+          JSON.stringify({ type: "restart-ice", target }),
+        ),
+      hostId,
+    );
+    await expect
+      .poll(() =>
+        guest.evaluate(
+          () =>
+            (
+              window as unknown as { __testPeers: RTCPeerConnection[] }
+            ).__testPeers[0].remoteDescription?.sdp.match(
+              /a=ice-ufrag:(.+)/,
+            )?.[1],
+        ),
+      )
+      .not.toBe(oldUfrag);
+    const before = await received(guest);
+    await expect
+      .poll(async () => {
+        const after = await received(guest);
+        return (
+          after.camera > before.camera &&
+          after.screen > before.screen &&
+          after.audio > before.audio
+        );
+      })
+      .toBe(true);
+    expect(
+      await host.evaluate(() =>
+        (window as unknown as { __testPeers: RTCPeerConnection[] }).__testPeers
+          .filter((pc) => pc.connectionState !== "closed")
+          .map((pc) => pc.getTransceivers().length),
+      ),
+    ).toEqual([3]);
+    await host
+      .getByRole("button", { name: "Stop sharing screen", exact: true })
+      .click();
+    await expect(guest.locator(".screen-tile")).toHaveCount(0);
+  } finally {
+    await room.close();
+  }
+});
+
+test("leaving while the screen picker is pending releases late capture and peers", async ({
+  browser,
+  request,
+}) => {
+  const room = await pair(browser, request, { ice_servers: [] });
+  try {
+    await room.guest.evaluate(() => {
+      navigator.mediaDevices.getDisplayMedia = () =>
+        new Promise<MediaStream>((resolve) => {
+          Object.defineProperty(window, "__resolveDisplay", {
+            configurable: true,
+            value: resolve,
+          });
+        });
+    });
+    await room.guest
+      .getByRole("button", { name: "Share screen", exact: true })
+      .click();
+    await expect(
+      room.guest.getByRole("button", { name: "Share screen", exact: true }),
+    ).toBeDisabled();
+    await room.guest
+      .getByRole("button", { name: "Leave", exact: true })
+      .click();
+    await expect(room.guest).toHaveURL(new URL("/", FRONTEND).href);
+    await room.guest.evaluate(() => {
+      const canvas = document.createElement("canvas");
+      const stream = canvas.captureStream();
+      Object.defineProperty(window, "__displayTrack", {
+        configurable: true,
+        value: stream.getVideoTracks()[0],
+      });
+      (
+        window as unknown as { __resolveDisplay: (stream: MediaStream) => void }
+      ).__resolveDisplay(stream);
+    });
+    await expect
+      .poll(() =>
+        room.guest.evaluate(
+          () =>
+            (window as unknown as { __displayTrack: MediaStreamTrack })
+              .__displayTrack.readyState,
+        ),
+      )
+      .toBe("ended");
+    expect(
+      await room.guest.evaluate(() =>
+        (
+          window as unknown as { __testPeers: RTCPeerConnection[] }
+        ).__testPeers.every((pc) => pc.connectionState === "closed"),
+      ),
+    ).toBe(true);
+    await expect(room.host.locator(".screen-tile")).toHaveCount(0);
+    await expect(room.host.locator(".camera-tile")).toHaveCount(1);
+  } finally {
+    await room.close();
+  }
+});
+
+test("screen sharing sends separate camera and screen video while preserving audio", async ({
   browser,
   request,
 }) => {
@@ -207,6 +618,14 @@ test("screen sharing replaces video, preserves audio, and restores camera", asyn
           ctx.font = "48px sans-serif";
           ctx.fillText("Shared presentation", 80, 120);
           const capture = canvas.captureStream(15);
+          let frame = 0;
+          const paint = () => {
+            if (capture.getVideoTracks()[0].readyState !== "live") return;
+            ctx.fillStyle = frame++ % 2 ? "white" : "black";
+            ctx.fillRect(20, 20, 30, 30);
+            requestAnimationFrame(paint);
+          };
+          paint();
           Object.defineProperty(window, "__displayTrack", {
             configurable: true,
             value: capture.getVideoTracks()[0],
@@ -252,8 +671,32 @@ test("screen sharing replaces video, preserves audio, and restores camera", asyn
       };
     });
     expect(during.audio).toBe(original.audio);
-    expect(during.video).not.toBe(original.video);
+    expect(during.video).toBe(original.video);
     expect(during.state).toBe("connected");
+    await expect(guest.locator(".camera-tile")).toHaveCount(2);
+    const before = await received(guest);
+    await expect
+      .poll(async () => {
+        const after = await received(guest);
+        return (
+          after.camera > before.camera &&
+          after.screen > before.screen &&
+          after.audio > before.audio
+        );
+      })
+      .toBe(true);
+    expect(
+      await host.evaluate(() => {
+        const pc = (window as unknown as { __testPeers: RTCPeerConnection[] })
+          .__testPeers[0];
+        return {
+          channels: pc.getTransceivers().length,
+          videos: pc
+            .getSenders()
+            .filter((sender) => sender.track?.kind === "video").length,
+        };
+      }),
+    ).toEqual({ channels: 3, videos: 2 });
     await host.screenshot({ path: "../artifacts/screen-sharing.png" });
     // Browser's native Stop Sharing event follows the same cleanup path.
     await host.evaluate(() => {
@@ -275,12 +718,37 @@ test("screen sharing replaces video, preserves audio, and restores camera", asyn
         ),
       )
       .toBe(original.video);
-    // Sharing works with the camera disabled and restores that disabled state.
+    await expect
+      .poll(() =>
+        host.evaluate(() => {
+          const pc = (window as unknown as { __testPeers: RTCPeerConnection[] })
+            .__testPeers[0];
+          return pc
+            .getSenders()
+            .filter((sender) => sender.track?.kind === "video").length;
+        }),
+      )
+      .toBe(1);
+    expect(
+      await host.evaluate(
+        () =>
+          (window as unknown as { __displayTrack: MediaStreamTrack })
+            .__displayTrack.readyState,
+      ),
+    ).toBe("ended");
+    // Sharing works with the camera disabled and preserves that disabled state.
     await host.getByRole("button", { name: "Stop video", exact: true }).click();
     await host
       .getByRole("button", { name: "Share screen", exact: true })
       .click();
     await expect(guest.locator(".screen-tile")).toBeVisible();
+    const offBefore = await received(guest);
+    await expect
+      .poll(async () => {
+        const after = await received(guest);
+        return after.screen > offBefore.screen && after.audio > offBefore.audio;
+      })
+      .toBe(true);
     await host
       .getByRole("button", { name: "Stop sharing screen", exact: true })
       .click();
@@ -379,6 +847,10 @@ test("ICE failure diagnostics and retry recover without leaving the room", async
     true,
   );
   try {
+    await displaySource(room.host);
+    await room.host
+      .getByRole("button", { name: "Share screen", exact: true })
+      .click();
     await expect(
       room.guest.getByRole("button", { name: "Copy connection diagnostics" }),
     ).toBeVisible({ timeout: 30000 });
@@ -430,6 +902,17 @@ test("ICE failure diagnostics and retry recover without leaving the room", async
         "connected",
       );
     }
+    const recovered = await received(room.guest);
+    await expect
+      .poll(async () => {
+        const after = await received(room.guest);
+        return (
+          after.camera > recovered.camera &&
+          after.screen > recovered.screen &&
+          after.audio > recovered.audio
+        );
+      })
+      .toBe(true);
   } finally {
     await room.close();
   }
@@ -507,6 +990,31 @@ for (const transport of ["udp", "tcp", "tls"] as const)
           )
           .toBe(true);
       }
+      await displaySource(room.host);
+      await room.host
+        .getByRole("button", { name: "Share screen", exact: true })
+        .click();
+      const beforeShare = await received(room.guest);
+      await expect
+        .poll(
+          async () => {
+            const after = await received(room.guest);
+            return (
+              after.camera > beforeShare.camera &&
+              after.screen > beforeShare.screen &&
+              after.audio > beforeShare.audio &&
+              (await packets(room.guest)).relay
+            );
+          },
+          { timeout: 30000 },
+        )
+        .toBe(true);
+      await expect(room.guest.locator(".screen-tile video")).toBeVisible();
+      await expect(room.guest.locator(".camera-tile")).toHaveCount(2);
+      await room.host
+        .getByRole("button", { name: "Stop sharing screen", exact: true })
+        .click();
+      await expect(room.guest.locator(".screen-tile")).toHaveCount(0);
       await test.info().attach("relay-rtp", {
         body: JSON.stringify({
           host: await packets(room.host),

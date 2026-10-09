@@ -2093,10 +2093,11 @@ select {
 }
 .meeting-room {
   height: 100%;
+  min-height: 0;
   background: #0d0d0d;
   color: #eee;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
   border-radius: 10px;
   position: relative;
@@ -2227,6 +2228,9 @@ select {
   display: flex;
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
 }
 .meeting-stage {
   display: flex;
@@ -2237,6 +2241,7 @@ select {
   min-height: 0;
   padding: 0 8px 8px;
   position: relative;
+  overflow: hidden;
 }
 .video-grid {
   display: grid;
@@ -2246,6 +2251,11 @@ select {
   width: 100%;
   max-width: 1600px;
   min-height: 0;
+  min-width: 0;
+  flex: 1;
+  grid-auto-rows: minmax(0, 1fr);
+  align-items: center;
+  overflow: hidden;
   margin: auto;
 }
 .video-grid-solo {
@@ -2257,6 +2267,8 @@ select {
 .video-tile {
   aspect-ratio: 16/9;
   min-height: 0;
+  min-width: 0;
+  max-height: 100%;
   position: relative;
   overflow: hidden;
   background: #1a1a1a;
@@ -2294,7 +2306,8 @@ select {
   border-radius: 5px;
   font-size: 12px;
   padding: 8px 12px;
-  margin-bottom: 12px;
+  margin-bottom: 6px;
+  flex: none;
 }
 .sharing-banner button {
   background: #b92e3c;
@@ -2302,17 +2315,58 @@ select {
   border-radius: 4px;
   padding: 5px 10px;
 }
-@media (min-width: 1001px) {
-  .video-grid:has(.screen-tile) {
-    grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
-    align-items: center;
-  }
-  .video-grid-solo:has(.screen-tile) {
-    grid-template-columns: 1fr;
-  }
-  .screen-tile {
-    order: -1;
-  }
+.presentation-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 23%);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.presentation-screens {
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 6px;
+  min-height: 0;
+  min-width: 0;
+}
+.presentation-screens .screen-tile {
+  aspect-ratio: auto;
+}
+.camera-strip {
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.camera-strip .video-tile {
+  width: 100%;
+  aspect-ratio: 16/9;
+}
+.camera-strip .tile-avatar {
+  height: 48px;
+  width: 48px;
+  font-size: 18px;
+}
+.camera-strip .tile-placeholder > span {
+  display: none;
+}
+.camera-strip .tile-name {
+  font-size: 10px;
+  left: 4px;
+  bottom: 4px;
+  gap: 4px;
+  max-width: calc(100% - 8px);
+}
+.camera-strip .tile-name > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .video-hidden {
   opacity: 0;
@@ -2463,6 +2517,8 @@ select {
   justify-content: space-between;
   padding: 0 14px;
   flex: none;
+  position: relative;
+  z-index: 2;
 }
 .toolbar-media,
 .toolbar-center {
@@ -2490,6 +2546,13 @@ select {
   min-width: 55px;
   border-radius: 5px;
   padding: 5px 6px;
+}
+.toolbar-control svg,
+.end-button svg {
+  width: 24px;
+  height: 24px;
+  stroke-width: 1.75;
+  flex: none;
 }
 .toolbar-control > span:last-child {
   font-size: 11px;
@@ -2700,13 +2763,13 @@ select {
 }
 @media (max-width: 1000px) {
   .meeting-stage {
-    padding: 18px;
+    padding: 0 8px 8px;
   }
   .video-grid {
     gap: 10px;
   }
   .video-grid .video-tile {
-    aspect-ratio: 4/3;
+    aspect-ratio: 16/9;
   }
   .toolbar-media,
   .toolbar-end {
@@ -2733,12 +2796,13 @@ select {
   .participants-panel {
     width: 260px;
   }
-  .room-content:has(.participants-panel) .video-grid {
-    grid-template-columns: 1fr;
-    max-width: 600px;
-  }
-  .room-content:has(.participants-panel) .video-tile {
-    aspect-ratio: 16/9;
+  .participants-panel,
+  .chat-panel {
+    position: absolute;
+    z-index: 25;
+    inset: 0 0 0 auto;
+    width: min(320px, 100%);
+    box-shadow: -15px 0 40px #0004;
   }
   .room-content:has(.participants-panel) .tile-avatar {
     height: 55px;
@@ -2817,6 +2881,9 @@ select {
     width: 11px;
   }
   .room-view-button {
+    padding: 6px;
+  }
+  .room-view-button > span {
     display: none;
   }
   .room-timer {
@@ -2903,19 +2970,12 @@ select {
     padding: 9px 12px;
     font-size: 10px;
   }
-  .toolbar-info,
-  .host-tools {
-    display: none;
-  }
   .participants-panel {
     position: absolute;
     z-index: 25;
-    inset: 48px 0 73px auto;
+    inset: 0 0 0 auto;
     width: min(300px, 90vw);
     box-shadow: -15px 0 40px #0004;
-  }
-  .room-content:has(.participants-panel) .video-tile {
-    aspect-ratio: auto;
   }
   .room-error {
     font-size: 9px;
@@ -3037,7 +3097,8 @@ select {
     grid-auto-rows: minmax(0, 1fr);
   }
   .video-grid .video-tile {
-    max-height: none;
+    aspect-ratio: 16/9;
+    max-height: 100%;
     min-height: 0;
   }
   .video-grid-solo .video-tile {
@@ -3061,40 +3122,75 @@ select {
     font-size: 10px;
   }
   .meeting-toolbar {
-    height: 62px;
-    padding: 0 5px;
+    height: auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 52px 56px;
+    gap: 2px;
+    padding: 2px 6px calc(2px + env(safe-area-inset-bottom));
   }
   .toolbar-control {
-    min-width: 39px;
+    min-width: 44px;
     padding: 4px 3px;
-    height: 54px;
+    height: 52px;
     gap: 5px;
   }
   .toolbar-control > span:last-child {
-    font-size: 9px;
+    font-size: 10px;
   }
   .toolbar-center {
-    gap: 0;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 2px;
   }
   .toolbar-media {
-    gap: 0;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+  .toolbar-end {
+    grid-column: 2;
+    grid-row: 1;
   }
   .toolbar-share > span:last-child {
-    max-width: 37px;
+    max-width: none;
     white-space: normal;
-    line-height: 1.1;
+    line-height: 1.2;
+  }
+  .toolbar-info > span:last-child {
+    white-space: normal;
+    line-height: 1.2;
   }
   .end-button {
-    min-width: 38px;
+    min-width: 44px;
     padding: 4px;
     font-size: 10px;
   }
   .participants-panel {
-    top: 44px;
-    bottom: 62px;
+    top: 0;
+    bottom: 0;
     width: min(320px, 100%);
   }
   .workspace-in-call ~ .toast {
-    bottom: 78px;
+    bottom: 128px;
+  }
+}
+@media (max-width: 900px) {
+  .presentation-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 130px);
+    gap: 6px;
+  }
+  .camera-strip {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .camera-strip .video-tile {
+    height: auto;
+    width: 100%;
+    max-height: 100%;
   }
 }

@@ -10,9 +10,32 @@ interface Peer {
   pc: RTCPeerConnection;
   candidates: RTCIceCandidateInit[];
   stream: MediaStream;
+  screen: MediaStream;
   makingOffer: boolean;
   diagnostics: ReturnType<typeof rtcDiagnostics>;
   timeout?: ReturnType<typeof setTimeout>;
+}
+
+// Every pair negotiates audio, camera, then screen once. Empty senders allow
+// sharing and device changes without new offers or interrupting camera audio.
+function mediaSlots(pc: RTCPeerConnection) {
+  const transceivers = pc.getTransceivers();
+  const videos = transceivers.filter(
+    (item) => item.receiver.track.kind === "video",
+  );
+  return [
+    transceivers.find((item) => item.receiver.track.kind === "audio"),
+    videos[0],
+    videos[1],
+  ];
+}
+
+function mediaTracks(stream: MediaStream | null, screen: MediaStream | null) {
+  return [
+    stream?.getAudioTracks()[0] ?? null,
+    stream?.getVideoTracks()[0] ?? null,
+    screen?.getVideoTracks()[0] ?? null,
+  ];
 }
 
 function closePeer(peer: Peer) {
@@ -53,8 +76,9 @@ export function useConference(
   videoEnabled: boolean,
   onMute: () => void,
   notify: (message: string) => void,
-  screenSharing = false,
+  screen: MediaStream | null = null,
 ) {
+  const screenSharing = !!screen;
   const socketRef = useRef<WebSocket | null>(null);
   const retryRef = useRef<(() => Promise<void>) | null>(null);
   const peers = useRef(new Map<number, Peer>());
@@ -63,11 +87,15 @@ export function useConference(
     audioEnabled,
     videoEnabled,
     screenSharing,
+    screen,
   });
   const muteRef = useRef(onMute);
   const notifyRef = useRef(notify);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [remoteStreams, setRemoteStreams] = useState<
+    Record<number, MediaStream>
+  >({});
+  const [remoteScreenStreams, setRemoteScreenStreams] = useState<
     Record<number, MediaStream>
   >({});
   const [peerStates, setPeerStates] = useState<Record<number, string>>({});
@@ -81,21 +109,23 @@ export function useConference(
     notifyRef.current = notify;
   }, [onMute, notify]);
   useEffect(() => {
-    mediaRef.current = { stream, audioEnabled, videoEnabled, screenSharing };
+    mediaRef.current = {
+      stream,
+      audioEnabled,
+      videoEnabled,
+      screenSharing,
+      screen,
+    };
     for (const { pc } of peers.current.values()) {
-      for (const kind of ["audio", "video"]) {
-        const sender = pc
-          .getTransceivers()
-          .find(
-            (transceiver) => transceiver.receiver.track.kind === kind,
-          )?.sender;
-        const track =
-          stream?.getTracks().find((track) => track.kind === kind) ?? null;
+      const tracks = mediaTracks(stream, screen);
+      for (const [index, transceiver] of mediaSlots(pc).entries()) {
+        const sender = transceiver?.sender;
+        const track = tracks[index];
         if (sender && sender.track !== track)
           void sender.replaceTrack(track).catch((error) => {
             if (pc.connectionState !== "closed")
               setError(
-                `We couldn't update your ${kind} track. ${errorMessage(error)}`,
+                `We couldn't update your ${["microphone", "camera", "screen"][index]} track. ${errorMessage(error)}`,
               );
           });
       }
@@ -110,7 +140,7 @@ export function useConference(
           screen_sharing: screenSharing,
         }),
       );
-  }, [stream, audioEnabled, videoEnabled, screenSharing]);
+  }, [stream, audioEnabled, videoEnabled, screenSharing, screen]);
 
   useEffect(() => {
     if (!admission) return;
@@ -138,6 +168,11 @@ export function useConference(
       peerMap.delete(id);
       clearRecoveredError();
       setRemoteStreams((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      setRemoteScreenStreams((current) => {
         const next = { ...current };
         delete next[id];
         return next;
@@ -185,6 +220,7 @@ export function useConference(
             pc,
             candidates: [],
             stream: new MediaStream(),
+            screen: new MediaStream(),
             makingOffer: false,
             diagnostics: rtcDiagnostics(pc, turnConfigured),
           };
@@ -192,15 +228,18 @@ export function useConference(
           // The offerer creates m-lines. The answerer uses the transceivers from
           // the remote offer; precreating its own can produce one-way media.
           if (localId < id)
-            for (const kind of ["audio", "video"] as const) {
-              const track = mediaRef.current.stream
-                ?.getTracks()
-                .find((track) => track.kind === kind);
+            for (const [index, kind] of (
+              ["audio", "video", "video"] as const
+            ).entries()) {
+              const track = mediaTracks(
+                mediaRef.current.stream,
+                mediaRef.current.screen,
+              )[index];
+              const source =
+                index === 2 ? mediaRef.current.screen : mediaRef.current.stream;
               pc.addTransceiver(track ?? kind, {
                 direction: "sendrecv",
-                streams: mediaRef.current.stream
-                  ? [mediaRef.current.stream]
-                  : [],
+                streams: source ? [source] : [],
               });
             }
           pc.onicecandidate = (event) => {
@@ -218,13 +257,17 @@ export function useConference(
           };
           pc.ontrack = (event) => {
             if (cancelled || peerMap.get(id) !== peer) return;
+            const isScreen = event.transceiver === mediaSlots(pc)[2];
+            const target = isScreen ? peer.screen : peer.stream;
             if (
-              !peer.stream
-                .getTracks()
-                .some((track) => track.id === event.track.id)
+              !target.getTracks().some((track) => track.id === event.track.id)
             )
-              peer.stream.addTrack(event.track);
-            setRemoteStreams((current) => ({ ...current, [id]: peer.stream }));
+              target.addTrack(event.track);
+            const update = isScreen ? setRemoteScreenStreams : setRemoteStreams;
+            update((current) => ({
+              ...current,
+              [id]: new MediaStream(target.getTracks()),
+            }));
           };
           pc.onconnectionstatechange = () => {
             if (!cancelled && peerMap.get(id) === peer) {
@@ -368,17 +411,23 @@ export function useConference(
                     else peer.candidates.push(candidate);
                   }
                   if (message.type === "offer") {
-                    for (const transceiver of peer.pc.getTransceivers()) {
-                      const track =
-                        mediaRef.current.stream
-                          ?.getTracks()
-                          .find(
-                            (track) =>
-                              track.kind === transceiver.receiver.track.kind,
-                          ) ?? null;
+                    const tracks = mediaTracks(
+                      mediaRef.current.stream,
+                      mediaRef.current.screen,
+                    );
+                    for (const [index, transceiver] of mediaSlots(
+                      peer.pc,
+                    ).entries()) {
+                      if (!transceiver) continue;
+                      const track = tracks[index];
                       await transceiver.sender.replaceTrack(track);
-                      if (mediaRef.current.stream)
-                        transceiver.sender.setStreams(mediaRef.current.stream);
+                      const source =
+                        index === 2
+                          ? mediaRef.current.screen
+                          : mediaRef.current.stream;
+                      transceiver.sender.setStreams(
+                        ...(source ? [source] : []),
+                      );
                       transceiver.direction = "sendrecv";
                     }
                     await peer.pc.setLocalDescription(
@@ -449,6 +498,9 @@ export function useConference(
             setError("The meeting connection closed. Rejoin to connect again.");
             peerMap.forEach(closePeer);
             peerMap.clear();
+            setRemoteStreams({});
+            setRemoteScreenStreams({});
+            setPeerStates({});
           }
         };
       } catch (error) {
@@ -511,6 +563,7 @@ export function useConference(
   return {
     participants,
     remoteStreams,
+    remoteScreenStreams,
     peerStates,
     connection,
     terminal,

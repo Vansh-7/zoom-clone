@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-export function useScreenShare(camera: MediaStream | null) {
+export function useScreenShare() {
   const capture = useRef<MediaStream | null>(null);
   const generation = useRef(0);
   const alive = useRef(true);
@@ -79,11 +79,8 @@ export function useScreenShare(camera: MediaStream | null) {
   }
 
   const stream = useMemo(
-    () =>
-      track
-        ? new MediaStream([...(camera?.getAudioTracks() ?? []), track])
-        : camera,
-    [camera, track],
+    () => (track ? new MediaStream([track]) : null),
+    [track],
   );
   return { stream, sharing: !!track, pending, start, stop };
 }
