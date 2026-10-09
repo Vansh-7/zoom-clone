@@ -20,7 +20,7 @@ artifacts/
 *.tsbuildinfo
 .DS_Store
 
-# Local preparation notes; README and interview notes are submission documentation.
+# Local preparation notes.
 /IMPLEMENTATION_CHECKLIST.md
 /SUBMISSION_CHECKLIST.md
 /TEST_RESULTS.md
@@ -36,3 +36,8 @@ htmlcov/
 .idea/
 .vscode/
 /INTERVIEW_NOTES.md
+
+# Private local deployment and verification notes.
+/docs/DEPLOYMENT.md
+/docs/MESH_VERIFICATION.md
+/docs/RELEASE_CHECKS.md

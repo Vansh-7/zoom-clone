@@ -89,7 +89,7 @@ Use [backend/.env.example](backend/.env.example) and [frontend/.env.example](fro
 3. **Vercel:** use `frontend` as the root directory, the Next.js preset, Node.js 22, and `NEXT_PUBLIC_API_BASE_URL=https://zoom-clone-api.up.railway.app`. Keep the stable production domain public for evaluators.
 4. Verify backend health, direct invitations, scheduling, and two-person media after deployment. HTTPS API configuration produces WSS signaling URLs. Coordinate backend restarts because active calls are interrupted; SQLite data remains on the volume.
 
-Some networks require TURN. Configure provider-issued credentials in Railway's `ICE_SERVERS_JSON`, then redeploy the backend. The current public configuration has STUN only, so cross-network connectivity is not guaranteed. See [deployment and TURN setup](docs/DEPLOYMENT.md) for the exact configuration and release checks.
+Some networks require TURN. Configure provider-issued credentials in Railway's `ICE_SERVERS_JSON`, then redeploy the backend. TURN entries require `urls`, `username`, and `credential`. Keep `ICE_TRANSPORT_POLICY=all` for normal operation. The current public configuration has STUN only, so cross-network connectivity is not guaranteed.
 
 ## Tests
 
@@ -114,7 +114,7 @@ npm.cmd run test:e2e
 
 Start both servers before Playwright. Tests default to ports 3000 and 8000; `E2E_FRONTEND_URL` and `E2E_API_URL` override them. Use a separate SQLite database for browser tests because they create meeting records. Relay tests use configured TURN credentials or `E2E_RTC_CONFIG_FILE`; they skip when neither is available.
 
-Verified on October 9, 2026: 104 backend tests, 19 local Chrome regression checks, and seven production browser checks passed. Ruff, frontend lint, type checking, formatting, build, and GitHub CI passed. Production verification covered meeting workflows, calendar export, synthetic bidirectional media, sharing, chat, host controls, ICE retry, and SQLite persistence after a backend restart. See [release checks](docs/RELEASE_CHECKS.md) for scope and commands. Separate [mesh measurements](docs/MESH_VERIFICATION.md) do not change the production limit of two.
+Verified on October 9, 2026: 104 backend tests, 19 local Chrome regression checks, and seven production browser checks passed. Ruff, frontend lint, type checking, formatting, build, and GitHub CI passed. Production verification covered meeting workflows, calendar export, synthetic bidirectional media, sharing, chat, host controls, ICE retry, and SQLite persistence after a backend restart. Production remains limited to two participants.
 
 ## Limitations
 
