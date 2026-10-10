@@ -4,6 +4,31 @@ A Zoom-inspired browser application for instant meetings, scheduling, and meetin
 
 [Live application](https://zoom-clone-vansh.vercel.app) · [Repository](https://github.com/Vansh-7/zoom-clone) · [API documentation](https://zoom-clone-api.up.railway.app/docs) · [Backend health](https://zoom-clone-api.up.railway.app/api/health)
 
+## Table of Contents
+
+- [Features](#features)
+  - [Dashboard and meeting management](#dashboard-and-meeting-management)
+  - [Creation, joining, and scheduling](#creation-joining-and-scheduling)
+  - [Real-time conferencing](#real-time-conferencing)
+  - [Screen sharing and collaboration](#screen-sharing-and-collaboration)
+  - [Host controls and safeguards](#host-controls-and-safeguards)
+- [Application Screenshots](#application-screenshots)
+- [Tech Stack & Architecture](#tech-stack--architecture)
+- [Project Structure](#project-structure)
+- [Database Design](#database-design)
+- [API Documentation](#api-documentation)
+  - [Requests, capabilities, and errors](#requests-capabilities-and-errors)
+  - [Rate limits and proxy identity](#rate-limits-and-proxy-identity)
+  - [WebSocket protocol](#websocket-protocol)
+- [Meeting Workflows & Design Decisions](#meeting-workflows--design-decisions)
+- [Local Setup](#local-setup)
+- [Environment Variables](#environment-variables)
+- [Deployment](#deployment)
+- [Testing & Verification](#testing--verification)
+  - [Running the checks](#running-the-checks)
+  - [Recorded verification results](#recorded-verification-results)
+- [Known Limitations](#known-limitations)
+
 ## Features
 
 Features describe the current source, including individual private chat and the latest meeting UI refinements. The recorded production evidence below is for the earlier release `9ef5ffa` and predates private chat.
@@ -48,7 +73,23 @@ Supports up to 4 participants per meeting using mesh-based WebRTC, with real-tim
 
 Demonstration meetings are labeled samples and can be claimed once for host access. Their seeded Previous entries are example records, not evidence of completed calls; application-created meetings remain separate records.
 
-## Stack and Structure
+[Back to top](#zoom-clone)
+
+## Application Screenshots
+
+Existing snapshots from a local production build with SQLite-backed data. The meeting-room image shows two participants with cameras off and a raised hand. Screenshots illustrate the interface; they do not establish media-test results.
+
+| Home                                               | Meetings                                                              |
+| -------------------------------------------------- | --------------------------------------------------------------------- |
+| ![Home](docs/screenshots/dashboard.png)            | ![Meetings](docs/screenshots/meetings.png)                            |
+| Schedule                                           | Join                                                                  |
+| ![Schedule](docs/screenshots/scheduling.png)       | ![Join](docs/screenshots/join.png)                                    |
+| Meeting room                                       | Mobile                                                                |
+| ![Meeting room](docs/screenshots/meeting-room.png) | <img src="docs/screenshots/mobile.png" alt="Mobile Home" width="200"> |
+
+[Back to top](#zoom-clone)
+
+## Tech Stack & Architecture
 
 | Layer        | Technology and responsibility                                                                                                                 |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -74,6 +115,10 @@ flowchart TB
 ```
 
 The diagram shows two clients for readability. Each additional participant connects to every other participant; TURN relays media only when the selected ICE path requires it.
+
+[Back to top](#zoom-clone)
+
+## Project Structure
 
 ```text
 zoom-clone/
@@ -108,6 +153,8 @@ zoom-clone/
 ├── docs/screenshots/
 └── .github/workflows/ci.yml
 ```
+
+[Back to top](#zoom-clone)
 
 ## Database Design
 
@@ -165,7 +212,9 @@ Startup creates missing tables with `metadata.create_all`; there is no migration
 
 **Sample data:** with `SEED_DATA=true`, startup inserts six fixed sample records once: three scheduled and three example ended meetings. Startup and meeting-list reads replenish each of three upcoming sample slots when no future, unclaimed sample remains, with at most one replacement per slot per UTC day. Existing records and host capabilities are preserved; normal schedule expiry still applies. `SEED_DATA=false` disables new sample meetings and replenishment, preserves existing samples and real meetings, and still initializes the default organizer.
 
-## API
+[Back to top](#zoom-clone)
+
+## API Documentation
 
 REST endpoints use the backend origin. Interactive schemas are available at `/docs`, `/redoc`, and `/openapi.json`. `{code}` is the public 11-digit meeting code, not the internal database ID. List endpoints return at most 100 records each.
 
@@ -285,7 +334,9 @@ For example, a private chat frame is `{ "type": "chat", "recipient_id": 42, "tex
 
 Reactions allow one event per second; chat requires at least 0.5 seconds between messages. Each authenticated socket has token buckets of 160 messages/40 per second and 20 non-candidate commands/5 per second. Messages are limited to 65,536 UTF-8 bytes; authentication frames to 1,024 bytes. Connection admission is bounded to 128 total sockets, 32 pending authentications, and 8 pending per IP, with additional global/per-IP attempt limits. Eight malformed or unauthorized host commands close the connection. Invalid sessions close with 4401, policy/rate violations with 1008, and oversized frames with 1009.
 
-## Meeting Behavior and Design Decisions
+[Back to top](#zoom-clone)
+
+## Meeting Workflows & Design Decisions
 
 1. **Creation and ownership:** cryptographically generated 11-digit meeting codes are protected by a unique database index. Instant meetings enter `in_progress` immediately. Creation issues a random host capability, stores its hash, and returns the plaintext once. Browser storage retains ownership without adding account infrastructure.
 2. **Admission:** ID/link input is validated before prejoin. The server admits only active meetings, serializes capacity checks, and issues a new participant capability for each join. Scheduled guests wait for the host to start; ended/missed meetings reject admission. The fifth active participant receives `MEETING_FULL` at the supported four-person limit.
@@ -300,19 +351,9 @@ Reactions allow one event per second; chat requires at least 0.5 seconds between
 11. **Departure and restart:** leaving/disconnecting updates `left_at`, broadcasts roster changes, and closes the departed peer's tracks/connections. A disconnected host has a configurable grace period, default 30 seconds, to rejoin before the server ends the meeting. Admissions without a socket become stale after 60 seconds and are swept every 15 seconds. A backend restart preserves SQLite records but ends old live sessions; a closed signaling socket requires rejoining.
 12. **Architecture scope:** SQLite keeps the meeting model and persistence straightforward for a small deployment. One worker owns room state and rate buckets. Mesh WebRTC avoids a media server for four-person rooms, at the cost of per-peer upload and encoding work. Origin checks, capability validation, bounded transport, and rate limits protect the existing public workflow; they do not provide private account-based meetings.
 
-## Screenshots
+[Back to top](#zoom-clone)
 
-Existing snapshots from a local production build with SQLite-backed data. The meeting-room image shows two participants with cameras off and a raised hand. Screenshots illustrate the interface; they do not establish media-test results.
-
-| Home                                               | Meetings                                                              |
-| -------------------------------------------------- | --------------------------------------------------------------------- |
-| ![Home](docs/screenshots/dashboard.png)            | ![Meetings](docs/screenshots/meetings.png)                            |
-| Schedule                                           | Join                                                                  |
-| ![Schedule](docs/screenshots/scheduling.png)       | ![Join](docs/screenshots/join.png)                                    |
-| Meeting room                                       | Mobile                                                                |
-| ![Meeting room](docs/screenshots/meeting-room.png) | <img src="docs/screenshots/mobile.png" alt="Mobile Home" width="200"> |
-
-## Run locally
+## Local Setup
 
 Install Python 3.11 and Node.js 22. From PowerShell:
 
@@ -338,7 +379,9 @@ Open [localhost:3000](http://localhost:3000). Swagger is at [localhost:8000/docs
 
 For a local production build, replace `npm.cmd run dev` with `npm.cmd run build`, then `npm.cmd run start`. On macOS/Linux, use `.venv/bin/python`, `cp`, and `npm` in place of the Windows equivalents.
 
-## Configuration and deployment
+[Back to top](#zoom-clone)
+
+## Environment Variables
 
 Copy the examples in [backend/.env.example](backend/.env.example) and [frontend/.env.example](frontend/.env.example). Actual environment files, databases, and verification artifacts are ignored by Git.
 
@@ -356,6 +399,10 @@ Copy the examples in [backend/.env.example](backend/.env.example) and [frontend/
 | `TRUSTED_PROXY_CIDRS`      | Empty                            | Explicitly verified immediate proxy peers allowed to supply client identity. |
 | `PORT`                     | `8000`                           | Server listen port; Railway supplies its runtime value.                      |
 
+[Back to top](#zoom-clone)
+
+## Deployment
+
 1. **Railway:** use `backend` as the service root and its Dockerfile. Mount a persistent volume at `/data`, configure the SQLite path above and `/api/health`, and keep one worker/replica. `python -m app.server` reads `PORT` and enforces WebSocket size/queue limits.
 2. Set `FRONTEND_URL` and `CORS_ORIGINS` to the exact HTTPS frontend origin. Preserve the volume and existing variables when updating the service. Check volume permissions before changing the runtime user.
 3. **Vercel:** use `frontend`, the Next.js preset, Node.js 22, and `NEXT_PUBLIC_API_BASE_URL=https://zoom-clone-api.up.railway.app`. Rebuild when this public API setting changes. HTTPS API configuration produces WSS signaling URLs.
@@ -365,7 +412,11 @@ Copy the examples in [backend/.env.example](backend/.env.example) and [frontend/
 
 For relay verification, use a separate environment with policy `relay`, test each provider transport, and confirm a selected relay candidate plus increasing inbound audio/video RTP and decoded frames on both peers. Repeat between two real devices on independent networks. A configured TURN entry alone does not establish that these checks passed. Browser clients necessarily receive TURN credentials through RTC configuration; provider-scoped/short-lived credentials and usage quotas are needed for a hardened public deployment, and automatic credential rotation is not implemented.
 
-## Tests and verification
+[Back to top](#zoom-clone)
+
+## Testing & Verification
+
+### Running the checks
 
 Backend, from `backend`:
 
@@ -392,6 +443,8 @@ Compatibility checks use `npx.cmd playwright install firefox webkit`, then `npx.
 
 The [GitHub Actions workflow](.github/workflows/ci.yml) runs backend pytest/Ruff and frontend lint, type checking, formatting, production build, and Chromium Playwright against local services on pushes and pull requests.
 
+### Recorded verification results
+
 Local checks below cover the current UI/private-chat changes on October 10, 2026. CI and production evidence was recorded on October 9 for released application commit `9ef5ffa`; no new production deployment has been performed.
 
 | Environment       | Verified result                                                                                             | Boundary                                                                                                                                                                                             |
@@ -408,7 +461,9 @@ Local checks below cover the current UI/private-chat changes on October 10, 2026
 
 The final local pytest, Chrome, and WebKit runs had zero failed tests, as did the recorded production acceptance run for `9ef5ffa`. Browser-launch failures and skipped cases remain separate from successful coverage. Production acceptance used synthetic media and predates private chat; physical-device, sustained-call, independent-network relay, and physical Safari audio verification remain outstanding.
 
-## Scope and Known Limitations
+[Back to top](#zoom-clone)
+
+## Known Limitations
 
 - **Capacity and quality:** implemented/deployed capacity is four. Automated four-person media coverage uses controlled 360p/15 fps capture; normal camera requests are ideal 720p. Each browser sends media to three peers, increasing upload, encoding, and CPU load. Larger-room support and sustained 720p four-person performance are not established; there is no SFU or automatic quality adaptation.
 - **Networks and browsers:** hosted TURN is configured and synthetic relay transport checks passed, but independent real-device cross-network testing is still required. Physical Safari audio, Firefox media, and mobile device permissions/playback are not certified by local UI tests. Camera/microphone capture requires HTTPS or localhost and browser permission; speaker-output selection is not implemented.
@@ -417,3 +472,5 @@ The final local pytest, Chrome, and WebKit runs had zero failed tests, as did th
 - **Ephemeral collaboration:** each client retains at most 100 received chat messages across its conversations; history is not replayed to late joiners or persisted. Private messages are restricted to their two participants, including when neither is the host, but are processed by the backend and are not end-to-end encrypted. Reactions are temporary; raised hands and media state last only for the current server connection. Speaker selection is manual.
 - **Single-instance operation:** room state and rate buckets are process-local. Run one backend worker and replica. Restarts interrupt calls and end old active records, while scheduled/history records persist on the SQLite volume. SQLite and the current architecture are intended for this small deployment, not distributed scaling.
 - **Management scope:** scheduling, starting, viewing, and calendar export exist; editing/cancelling scheduled meetings and account recovery do not. Profile, settings, and contacts remain labeled placeholders. Trusted proxy ranges and TURN credential lifetime/quotas require deployment-specific review.
+
+[Back to top](#zoom-clone)
